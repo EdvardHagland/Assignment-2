@@ -70,8 +70,12 @@ def main() -> int:
                 "1",
                 "--examples-per-cluster",
                 "5",
+                "--temperature",
+                "0.0",
                 "--max-output-tokens",
-                "3500",
+                "7000",
+                "--raw-dir",
+                "artifacts/raw/gemini",
             ],
             project_root,
         )

@@ -456,7 +456,9 @@ def main() -> int:
         raw_text = ""
         parsed = None
         last_error: Optional[Exception] = None
+        next_max_output_tokens = max(args.max_output_tokens, 4096)
         for attempt in range(1, max(1, args.retries) + 1):
+            attempt_max_output_tokens = next_max_output_tokens
             try:
                 raw_text = call_gemini(
                     prompt=prompt,
@@ -464,7 +466,7 @@ def main() -> int:
                     model=args.model,
                     transport=client_mode,
                     timeout=args.timeout,
-                    max_output_tokens=args.max_output_tokens,
+                    max_output_tokens=attempt_max_output_tokens,
                     temperature=args.temperature,
                 )
                 try:
@@ -482,8 +484,8 @@ def main() -> int:
                         model=args.model,
                         transport=client_mode,
                         timeout=args.timeout,
-                        max_output_tokens=args.max_output_tokens,
-                        temperature=args.temperature,
+                        max_output_tokens=max(attempt_max_output_tokens, 7000),
+                        temperature=0.0,
                     )
                     parsed = parse_json_response(raw_text)
                 issues = validate_gemini_payload(parsed, expected_cluster_ids=[c.cluster_id for c in batch])
@@ -500,8 +502,8 @@ def main() -> int:
                         model=args.model,
                         transport=client_mode,
                         timeout=args.timeout,
-                        max_output_tokens=args.max_output_tokens,
-                        temperature=args.temperature,
+                        max_output_tokens=max(attempt_max_output_tokens, 7000),
+                        temperature=0.0,
                     )
                     parsed = parse_json_response(raw_text)
                     issues = validate_gemini_payload(parsed, expected_cluster_ids=[c.cluster_id for c in batch])
@@ -511,8 +513,24 @@ def main() -> int:
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
                 parsed = None
+                if raw_dir:
+                    write_json(
+                        raw_dir / f"{batch_id}_attempt_{attempt}_failed.json",
+                        {
+                            "prompt": prompt,
+                            "response_text": raw_text,
+                            "error": str(exc),
+                            "max_output_tokens": attempt_max_output_tokens,
+                        },
+                    )
                 if attempt >= args.retries:
                     break
+                next_max_output_tokens = min(max(attempt_max_output_tokens + 1500, int(attempt_max_output_tokens * 1.75)), 12000)
+                log(
+                    f"Gemini batch {batch_id} attempt {attempt} failed; "
+                    f"retrying with max_output_tokens={next_max_output_tokens}. "
+                    f"Reason: {exc}"
+                )
                 time.sleep(min(2 ** attempt, 8))
         if parsed is None:
             if last_error is None:

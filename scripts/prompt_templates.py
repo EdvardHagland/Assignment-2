@@ -235,11 +235,12 @@ Required structure:
 {json.dumps({"batch_id": "string", "corpus_name": "string", "global_assessment": {"executive_summary": "string", "overall_structure": "string", "critical_reading": "string", "merger_assessment": "string"}, "interpretations": [{"cluster_id": "string", "frame_label": "string", "summary": "string", "distinctive_emphasis": "string", "overlap_warning": "string", "merge_candidate_with": ["string"]}]}, ensure_ascii=False, indent=2)}
 
 Executive summary requirement:
--  150 words.
+-  120 to 150 words.
 - One paragraph.
+- Prefer compact wording over elaborate prose.
 
 {issue_block}
 
 Malformed response to repair:
-{_truncate_text(raw_response, limit=8000)}
+{_truncate_text(raw_response, limit=2500)}
 """.strip()
