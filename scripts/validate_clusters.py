@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
+import time
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -31,6 +33,11 @@ from sklearn.neighbors import NearestNeighbors
 
 
 sns.set_theme(style="whitegrid")
+
+
+def log(message: str) -> None:
+    timestamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{timestamp}] {message}", flush=True)
 
 
 def load_config(config_path: Path) -> dict:
@@ -172,6 +179,8 @@ def compute_null_distribution(
 
     rng = np.random.default_rng(seed)
     records = []
+    log(f"Permutation null: starting {n_draws} draws across k={cluster_range}")
+    report_every = max(1, n_draws // 10)
 
     for draw_idx in range(1, n_draws + 1):
         shuffled = column_shuffle_null(data, rng)
@@ -190,6 +199,11 @@ def compute_null_distribution(
                 "observed_cluster_count": observed_k,
             }
         )
+        if draw_idx == 1 or draw_idx == n_draws or draw_idx % report_every == 0:
+            log(
+                f"Permutation null: completed draw {draw_idx}/{n_draws} "
+                f"(best_k={best_k}, best_silhouette={best_score:.4f})"
+            )
 
     null_df = pd.DataFrame(records)
     p_value = float((1 + null_df["beats_observed"].sum()) / (1 + len(null_df)))
@@ -233,6 +247,8 @@ def compute_bootstrap_stability(
     subset_size = min(subset_size, n_rows)
 
     records = []
+    log(f"Bootstrap stability: starting {n_draws} draws with subset size {subset_size}")
+    report_every = max(1, n_draws // 10)
     for draw_idx in range(1, n_draws + 1):
         subset_idx = np.sort(rng.choice(n_rows, size=subset_size, replace=False))
         subset_data = data[subset_idx]
@@ -249,6 +265,11 @@ def compute_bootstrap_stability(
                 "silhouette_score": float(silhouette_score(subset_data, subset_labels, metric="euclidean")),
             }
         )
+        if draw_idx == 1 or draw_idx == n_draws or draw_idx % report_every == 0:
+            log(
+                f"Bootstrap stability: completed draw {draw_idx}/{n_draws} "
+                f"(ARI={records[-1]['adjusted_rand_index']:.4f})"
+            )
 
     return pd.DataFrame(records)
 
@@ -261,16 +282,23 @@ def compute_algorithm_agreement(data: np.ndarray, reference_labels: np.ndarray, 
     alternatives instead of being a quirk of one specific algorithm.
     """
 
+    log("Algorithm agreement: comparing KMeans with Agglomerative and Gaussian Mixture")
     agg = AgglomerativeClustering(n_clusters=cluster_count, linkage="ward")
     agg_labels = agg.fit_predict(data)
 
     gmm = GaussianMixture(n_components=cluster_count, random_state=seed, n_init=5)
     gmm_labels = gmm.fit_predict(data)
 
-    return {
+    result = {
         "kmeans_vs_agglomerative_ari": float(adjusted_rand_score(reference_labels, agg_labels)),
         "kmeans_vs_gmm_ari": float(adjusted_rand_score(reference_labels, gmm_labels)),
     }
+    log(
+        "Algorithm agreement: "
+        f"KMeans vs Agglomerative ARI={result['kmeans_vs_agglomerative_ari']:.4f}, "
+        f"KMeans vs GMM ARI={result['kmeans_vs_gmm_ari']:.4f}"
+    )
+    return result
 
 
 def group_sparse_categories(series: pd.Series, top_n: int) -> pd.Series:
@@ -293,9 +321,11 @@ def compute_metadata_association_tests(df: pd.DataFrame, top_n: int) -> list[dic
     fields = ["user_type", "language", "country", "has_attachment"]
     results: list[dict] = []
 
+    log("Metadata tests: starting chi-square association checks")
     for field in fields:
         if field not in df.columns:
             continue
+        log(f"Metadata tests: field '{field}'")
 
         if field == "has_attachment":
             grouped = df[field].fillna(False).astype(str)
@@ -323,7 +353,12 @@ def compute_metadata_association_tests(df: pd.DataFrame, top_n: int) -> list[dic
                 "columns": int(c_count),
             }
         )
+        log(
+            f"Metadata tests: field '{field}' done "
+            f"(p={p_value:.4g}, Cramer's V={cramers_v:.3f})"
+        )
 
+    log(f"Metadata tests: completed {len(results)} fields")
     return results
 
 
@@ -454,6 +489,8 @@ def main() -> None:
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parents[1]
+    start_time = time.time()
+    log("Starting validation stage")
     config_path = (project_root / args.config).resolve()
     config = load_config(config_path)
 
@@ -485,10 +522,14 @@ def main() -> None:
     embeddings = np.load(embeddings_path)
     assignments = pd.read_csv(cluster_assignments_path)
     model_selection = pd.read_csv(model_selection_path)
+    log(f"Loaded embeddings with shape {embeddings.shape}")
+    log(f"Loaded cluster assignments with {len(assignments)} rows")
 
+    log("Rebuilding PCA representation for validation")
     pca_embeddings = build_pca_representation(embeddings, seed=seed)
     labels = assignments["cluster_id"].to_numpy(dtype=int)
     cluster_count = int(len(np.unique(labels)))
+    log(f"Validation will assess {cluster_count} clusters")
 
     observed_metrics = {
         "cluster_count": cluster_count,
@@ -498,8 +539,10 @@ def main() -> None:
         "selected_from_model_search": model_selection.sort_values("silhouette_score", ascending=False).iloc[0].to_dict(),
     }
 
+    log("Computing Hopkins statistic")
     hopkins = compute_hopkins_statistic(pca_embeddings, sample_size=hopkins_samples, seed=seed)
 
+    log("Computing permutation null distribution")
     null_df, null_summary = compute_null_distribution(
         pca_embeddings,
         cluster_range=cluster_range,
@@ -509,6 +552,7 @@ def main() -> None:
         n_draws=n_null_draws,
     )
 
+    log("Computing bootstrap stability")
     bootstrap_df = compute_bootstrap_stability(
         pca_embeddings,
         reference_labels=labels,
@@ -518,6 +562,7 @@ def main() -> None:
         sample_fraction=bootstrap_fraction,
     )
 
+    log("Computing algorithm agreement")
     algorithm_agreement = compute_algorithm_agreement(
         pca_embeddings,
         reference_labels=labels,
@@ -525,10 +570,14 @@ def main() -> None:
         seed=seed,
     )
 
+    log("Computing metadata association tests")
     metadata_tests = compute_metadata_association_tests(assignments, top_n=top_categories_for_tests)
 
+    log("Saving validation figures")
     save_null_distribution_figure(null_df, observed_metrics["silhouette_score"], null_figure_path)
+    log(f"Saved null distribution figure to: {null_figure_path}")
     save_bootstrap_figure(bootstrap_df, bootstrap_figure_path)
+    log(f"Saved bootstrap figure to: {bootstrap_figure_path}")
 
     resamples_df = null_df.copy()
     resamples_df["resample_type"] = "permutation_null"
@@ -536,11 +585,13 @@ def main() -> None:
     bootstrap_export = bootstrap_df.copy()
     bootstrap_export["resample_type"] = "bootstrap_stability"
 
+    log(f"Writing resample table to: {validation_resamples_path}")
     pd.concat([resamples_df, bootstrap_export], ignore_index=True, sort=False).to_csv(
         validation_resamples_path,
         index=False,
         encoding="utf-8",
     )
+    log("Writing validation summary and markdown")
 
     summary_payload = {
         "observed_metrics": observed_metrics,
@@ -563,6 +614,7 @@ def main() -> None:
 
     with validation_summary_path.open("w", encoding="utf-8") as handle:
         json.dump(summary_payload, handle, ensure_ascii=False, indent=2)
+    log(f"Validation summary written to: {validation_summary_path}")
 
     validation_markdown = build_validation_markdown(
         observed_metrics=observed_metrics,
@@ -573,10 +625,9 @@ def main() -> None:
         metadata_tests=metadata_tests,
     )
     validation_markdown_path.write_text(validation_markdown, encoding="utf-8")
-
-    print(f"Validation summary written to: {validation_summary_path}")
-    print(f"Validation resamples written to: {validation_resamples_path}")
-    print(f"Validation markdown written to: {validation_markdown_path}")
+    log(f"Validation markdown written to: {validation_markdown_path}")
+    elapsed = time.time() - start_time
+    log(f"Validation stage complete in {elapsed:.1f}s")
 
 
 if __name__ == "__main__":

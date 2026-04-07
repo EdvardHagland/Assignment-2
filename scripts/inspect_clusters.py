@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 from pathlib import Path
 
@@ -43,6 +44,11 @@ INSPECTION_STOPWORDS = {
 }
 
 CATEGORICAL_SIGNAL_FIELDS = ["user_type", "language", "country", "has_attachment", "chunk_source"]
+
+
+def log(message: str) -> None:
+    timestamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{timestamp}] {message}", flush=True)
 
 
 def load_config(config_path: Path) -> dict:
@@ -94,7 +100,10 @@ def build_cluster_terms(df: pd.DataFrame, top_terms_per_cluster: int, min_df: in
     corpus_share = np.asarray(binary_matrix.mean(axis=0)).ravel()
 
     records: list[dict] = []
-    for cluster_id, group in df.groupby("cluster_id"):
+    cluster_groups = list(df.groupby("cluster_id"))
+    log(f"Building cluster-term table for {len(cluster_groups)} clusters")
+    for index, (cluster_id, group) in enumerate(cluster_groups, start=1):
+        log(f"Cluster terms: processing cluster {cluster_id} ({index}/{len(cluster_groups)})")
         cluster_binary = binary_matrix[group.index]
         cluster_doc_share = np.asarray(cluster_binary.mean(axis=0)).ravel()
         cluster_doc_counts = np.asarray(cluster_binary.sum(axis=0)).ravel()
@@ -148,6 +157,7 @@ def build_metadata_signals(df: pd.DataFrame, fields: list[str], top_n: int) -> d
         if field not in df.columns:
             continue
 
+        log(f"Building metadata lift signals for field: {field}")
         normalized = df[field].map(normalize_category)
         baseline = normalized.value_counts(normalize=True)
         field_payload: dict[str, list[dict]] = {}
@@ -212,8 +222,11 @@ def build_inspection_records(
     """Build one human-readable inspection record per cluster."""
 
     records: list[dict] = []
-    for _, summary_row in cluster_summary.sort_values("cluster_id").iterrows():
+    ordered_summary = list(cluster_summary.sort_values("cluster_id").iterrows())
+    log(f"Building inspection records for {len(ordered_summary)} clusters")
+    for index, (_, summary_row) in enumerate(ordered_summary, start=1):
         cluster_id = int(summary_row["cluster_id"])
+        log(f"Inspection: assembling cluster {cluster_id} ({index}/{len(ordered_summary)})")
 
         terms = (
             cluster_terms.loc[cluster_terms["cluster_id"] == cluster_id]
@@ -344,6 +357,7 @@ def main() -> None:
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parents[1]
+    log("Starting cluster inspection stage")
     config_path = (project_root / args.config).resolve()
     config = load_config(config_path)
 
@@ -364,6 +378,9 @@ def main() -> None:
     prepared_df = pd.read_csv(prepared_corpus)
     cluster_df = pd.read_csv(cluster_assignments_path)
     cluster_summary = pd.read_csv(cluster_summary_path)
+    log(f"Loaded prepared units: {len(prepared_df)}")
+    log(f"Loaded clustered rows: {len(cluster_df)}")
+    log(f"Loaded cluster summary rows: {len(cluster_summary)}")
 
     representative_examples_payload = load_optional_json(representative_examples_path)
     if not isinstance(representative_examples_payload, list):
@@ -377,6 +394,7 @@ def main() -> None:
     tfidf_min_df = int(analysis_cfg.get("tfidf_min_df", 5))
     tfidf_max_df = float(analysis_cfg.get("tfidf_max_df", 0.4))
     top_categories = int(analysis_cfg.get("top_categories_per_cluster", 5))
+    log("Computing cluster terms and metadata signals")
     cluster_terms = build_cluster_terms(
         df=cluster_df,
         top_terms_per_cluster=top_terms_per_cluster,
@@ -390,6 +408,7 @@ def main() -> None:
     )
 
     gemini_lookup = build_gemini_lookup(load_optional_json(qualitative_path))
+    log("Building inspection records")
     inspection_records = build_inspection_records(
         cluster_summary=cluster_summary,
         cluster_terms=cluster_terms,
@@ -415,9 +434,9 @@ def main() -> None:
     ensure_parent(cluster_inspection_markdown_path)
     cluster_inspection_markdown_path.write_text(render_markdown(inspection_records), encoding="utf-8")
 
-    print(f"Prepared units available: {len(prepared_df)}")
-    print(f"Cluster inspection markdown written to: {cluster_inspection_markdown_path}")
-    print(f"Cluster terms written to: {cluster_terms_path}")
+    log(f"Prepared units available: {len(prepared_df)}")
+    log(f"Cluster inspection markdown written to: {cluster_inspection_markdown_path}")
+    log(f"Cluster terms written to: {cluster_terms_path}")
 
 
 if __name__ == "__main__":

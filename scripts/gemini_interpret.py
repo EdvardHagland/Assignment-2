@@ -36,6 +36,11 @@ if str(SCRIPT_DIR) not in sys.path:
 import prompt_templates as templates
 
 
+def log(message: str) -> None:
+    timestamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{timestamp}] {message}", flush=True)
+
+
 CLUSTER_ID_CANDIDATES = ("cluster_id", "cluster", "cluster_name", "topic_id", "group_id")
 TEXT_CANDIDATES = (
     "clean_text",
@@ -276,6 +281,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     project_root = Path(__file__).resolve().parents[1]
+    log("Starting Gemini interpretation stage")
     config: Dict[str, Any] = {}
     if args.config:
         config = load_config((project_root / args.config).resolve())
@@ -302,14 +308,18 @@ def main() -> int:
     raw_dir = Path(args.raw_dir).expanduser().resolve() if args.raw_dir else None
     if raw_dir:
         raw_dir.mkdir(parents=True, exist_ok=True)
+        log(f"Raw Gemini outputs will be written to: {raw_dir}")
 
+    log(f"Loading cluster representatives from: {input_path}")
     clusters = load_clusters(input_path, examples_per_cluster=args.examples_per_cluster)
+    log(f"Loaded {len(clusters)} clusters with up to {args.examples_per_cluster} examples each")
     cluster_summary_value = config.get("paths", {}).get("cluster_summary") if config else None
     if cluster_summary_value:
         cluster_summary_path = Path(cluster_summary_value)
         if not cluster_summary_path.is_absolute():
             cluster_summary_path = (project_root / cluster_summary_path).resolve()
         if cluster_summary_path.exists():
+            log("Enriching clusters with summary table")
             enrich_clusters_with_summary(clusters, load_cluster_summary_lookup(cluster_summary_path))
     cluster_terms_value = config.get("paths", {}).get("cluster_terms") if config else None
     if cluster_terms_value:
@@ -317,6 +327,7 @@ def main() -> int:
         if not cluster_terms_path.is_absolute():
             cluster_terms_path = (project_root / cluster_terms_path).resolve()
         if cluster_terms_path.exists():
+            log("Enriching clusters with top-term table")
             enrich_clusters_with_terms(clusters, load_cluster_terms_lookup(cluster_terms_path))
     metadata_signals_value = config.get("paths", {}).get("cluster_metadata_signals") if config else None
     if metadata_signals_value:
@@ -324,9 +335,13 @@ def main() -> int:
         if not metadata_signals_path.is_absolute():
             metadata_signals_path = (project_root / metadata_signals_path).resolve()
         if metadata_signals_path.exists():
+            log("Enriching clusters with metadata signals")
             enrich_clusters_with_metadata_signals(clusters, load_metadata_signal_lookup(metadata_signals_path))
+    log("Building the full analysis bundle for Gemini")
     analysis_bundle = build_analysis_bundle(config, project_root, clusters)
+    log(f"Analysis bundle tables available: {', '.join(sorted(analysis_bundle.keys()))}")
     batches = make_batches(clusters, batch_size=args.batch_size)
+    log(f"Prepared {len(batches)} Gemini batch(es)")
 
     result = {
         "project": "Assignment 2 qualitative interpretation",
@@ -361,6 +376,7 @@ def main() -> int:
     }
 
     if args.dry_run:
+        log("Dry run requested; writing batch plan only")
         for i, batch in enumerate(batches, start=1):
             result["batches"].append(
                 {
@@ -378,8 +394,10 @@ def main() -> int:
         )
 
     client_mode = resolve_transport(args.transport)
+    log(f"Using Gemini transport: {client_mode}")
 
     if args.repair_existing_output:
+        log("Repairing existing Gemini output in place")
         if not output_path.exists():
             raise FileNotFoundError(f"Cannot repair missing output file: {output_path}")
         current_output = load_json(output_path)
@@ -423,6 +441,10 @@ def main() -> int:
 
     for batch_index, batch in enumerate(batches, start=1):
         batch_id = f"batch-{batch_index}"
+        log(
+            f"Gemini batch {batch_index}/{len(batches)}: "
+            f"clusters={[cluster.cluster_id for cluster in batch]}"
+        )
         prompt = templates.build_batch_prompt(
             batch_id,
             [cluster_to_prompt_payload(cluster) for cluster in batch],
@@ -516,11 +538,13 @@ def main() -> int:
         )
         for item in interpretations:
             result["interpretations"].append(normalize_interpretation(item, batch_id=batch_id))
+        log(f"Gemini batch {batch_id} completed")
 
         if args.sleep_between_calls > 0:
             time.sleep(args.sleep_between_calls)
 
     write_json(output_path, result)
+    log(f"Gemini interpretation written to: {output_path}")
     return 0
 
 

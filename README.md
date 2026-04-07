@@ -60,6 +60,12 @@ Quantitative pipeline only:
 !python run_pipeline.py --skip-gemini --skip-render
 ```
 
+Skip validation for a faster exploratory run:
+
+```python
+!python run_pipeline.py --skip-validation --skip-render
+```
+
 With Gemini:
 
 ```python

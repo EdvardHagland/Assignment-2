@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import os
 from pathlib import Path
@@ -30,6 +31,13 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 
 sns.set_theme(style="whitegrid")
+
+
+def log_step(message: str) -> None:
+    """Print a simple timestamped progress message for long Colab runs."""
+
+    timestamp = dt.datetime.now().strftime("%H:%M:%S")
+    print(f"[{timestamp}] {message}", flush=True)
 
 
 def load_config(config_path: Path) -> dict:
@@ -663,6 +671,7 @@ def main() -> None:
     # SentenceTransformer wraps a transformer model and pooling step so that
     # every text unit gets one dense semantic vector.
     hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN") or None
+    log_step("Loading sentence-transformer model.")
     try:
         model = SentenceTransformer(model_name, device=device, token=hf_token)
     except Exception as exc:
@@ -698,6 +707,7 @@ def main() -> None:
     #
     # If the prepared file is paragraph-like:
     # - one chunk from a response = one vector
+    log_step(f"Encoding {len(texts):,} text units into embeddings.")
     embeddings, actual_batch_size = encode_with_adaptive_batch_size(
         model,
         texts,
@@ -705,21 +715,29 @@ def main() -> None:
     )
     if actual_batch_size != batch_size:
         print(f"Embedding completed with reduced batch size: {actual_batch_size}")
+    log_step("Writing embedding matrix to disk.")
     np.save(embeddings_path, embeddings)
 
     # KMeans tends to behave better after a compact PCA representation than on
     # the full embedding matrix directly, especially for exploratory clustering.
     pca_components = min(int(analysis_config.get("pca_components", 50)), embeddings.shape[0], embeddings.shape[1])
+    log_step(f"Running PCA down to {pca_components} dimensions.")
     pca = PCA(n_components=pca_components, random_state=seed)
     pca_embeddings = pca.fit_transform(embeddings)
 
     # Search over several cluster counts instead of assuming one true answer.
+    log_step(
+        "Searching KMeans solutions for "
+        + ", ".join(str(value) for value in cluster_range)
+        + " clusters."
+    )
     best_model, metrics_df = fit_best_kmeans(
         pca_embeddings,
         cluster_range,
         seed,
         selection_metric=selection_metric,
     )
+    log_step("Saving model-selection diagnostics.")
     metrics_df.to_csv(model_selection_path, index=False)
     with clustering_decision_path.open("w", encoding="utf-8") as handle:
         json.dump(build_clustering_decision(metrics_df, selection_metric), handle, ensure_ascii=False, indent=2)
@@ -737,6 +755,7 @@ def main() -> None:
 
     # t-SNE is only for visualization.
     # It helps us draw a 2D map, but it is not the clustering algorithm itself.
+    log_step("Running t-SNE projection for the 2D embedding map.")
     tsne = TSNE(
         n_components=2,
         random_state=seed,
@@ -748,6 +767,7 @@ def main() -> None:
     df["map_x"] = map_coords[:, 0]
     df["map_y"] = map_coords[:, 1]
 
+    log_step("Writing clustered units and centroid-similarity tables.")
     df.to_csv(cluster_assignments_path, index=False, encoding="utf-8")
     centroid_similarity = build_centroid_similarity(embeddings, remapped_labels)
     centroid_similarity.to_csv(centroid_similarity_path, index=False, encoding="utf-8")
@@ -757,6 +777,7 @@ def main() -> None:
     cluster_summary = build_cluster_summary(df, embeddings, top_categories)
     cluster_summary.to_csv(cluster_summary_path, index=False, encoding="utf-8")
 
+    log_step("Selecting representative examples per cluster.")
     representative_examples = build_representative_examples(
         df,
         embeddings,
@@ -766,6 +787,7 @@ def main() -> None:
     with representative_examples_path.open("w", encoding="utf-8") as handle:
         json.dump(representative_examples, handle, ensure_ascii=False, indent=2)
 
+    log_step("Rendering diagnostic figures.")
     save_scatter(
         df,
         color_column="cluster_id",
@@ -797,6 +819,7 @@ def main() -> None:
     save_attachment_rates(df, figures_dir / "cluster_attachment_rates.png")
     save_daily_timeline(df, figures_dir / "daily_submission_volume.png")
 
+    log_step("Embedding and clustering stage complete.")
     print(f"Embeddings written to: {embeddings_path}")
     print(f"Cluster assignments written to: {cluster_assignments_path}")
     print(f"Cluster summary written to: {cluster_summary_path}")
