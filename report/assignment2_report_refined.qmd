@@ -73,13 +73,12 @@ fmt_pct <- function(x, digits = 1) {
 }
 
 excerpt_text <- function(text, limit = 220) {
-  value <- ifelse(is.na(text), "", text)
+  value <- ifelse(is.na(text), "", as.character(text))
   value <- gsub("\\s+", " ", value)
   value <- trimws(value)
-  if (nchar(value) <= limit) {
-    return(value)
-  }
-  paste0(substr(value, 1, limit - 1), "…")
+  too_long <- nchar(value, type = "width") > limit
+  value[too_long] <- paste0(substr(value[too_long], 1, limit - 1), "…")
+  value
 }
 
 safe_include_graphics <- function(path) {
