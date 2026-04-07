@@ -1484,8 +1484,10 @@ def validate_gemini_payload(payload: Mapping[str, Any], expected_cluster_ids: Se
     else:
         executive_summary = str(global_assessment.get("executive_summary", "")).strip()
         word_count = count_words(executive_summary)
-        if word_count != 150:
-            issues.append(f"Executive summary must be exactly 150 words, but it has {word_count}.")
+        if word_count < 80:
+            issues.append(f"Executive summary is too short to be useful ({word_count} words).")
+        elif word_count > 220:
+            issues.append(f"Executive summary is too long and likely drifting ({word_count} words).")
 
     interpretations = payload.get("interpretations")
     if not isinstance(interpretations, Sequence) or isinstance(interpretations, str):

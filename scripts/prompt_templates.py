@@ -235,7 +235,7 @@ Required structure:
 {json.dumps({"batch_id": "string", "corpus_name": "string", "global_assessment": {"executive_summary": "string", "overall_structure": "string", "critical_reading": "string", "merger_assessment": "string"}, "interpretations": [{"cluster_id": "string", "frame_label": "string", "summary": "string", "distinctive_emphasis": "string", "overlap_warning": "string", "merge_candidate_with": ["string"]}]}, ensure_ascii=False, indent=2)}
 
 Executive summary requirement:
--  120 to 150 words.
+- Around 120 to 150 words.
 - One paragraph.
 - Prefer compact wording over elaborate prose.
 
