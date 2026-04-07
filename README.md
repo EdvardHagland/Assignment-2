@@ -78,8 +78,6 @@ If you also install R and `rmarkdown`, you can run the full render:
 !python run_pipeline.py
 ```
 
-If you also install the R package `DT`, the HTML report will use sortable and searchable interactive tables instead of static ones.
-
 ## What this repo does
 
 The pipeline:
