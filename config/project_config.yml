@@ -29,9 +29,10 @@ analysis:
   model_name: "BAAI/bge-m3"
   device: "auto"
   batch_size_cpu: 8
-  batch_size_cuda: 64
+  batch_size_cuda: 8
   cpu_threads: 0
   use_fp16_on_cuda: true
+  max_seq_length: 512
   cluster_range: [3, 4, 5, 6, 7, 8]
   selection_metric: "silhouette_score"
   representative_central_examples: 3

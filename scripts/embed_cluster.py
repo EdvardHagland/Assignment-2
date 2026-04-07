@@ -74,6 +74,8 @@ def configure_runtime(analysis_config: dict) -> tuple[str, int]:
     """Apply device-aware runtime settings before model loading."""
 
     device = resolve_device(analysis_config.get("device", "auto"))
+    if device == "cuda":
+        os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     cpu_threads = int(analysis_config.get("cpu_threads", 0) or 0)
     if cpu_threads > 0:
         torch.set_num_threads(cpu_threads)
@@ -86,6 +88,50 @@ def configure_runtime(analysis_config: dict) -> tuple[str, int]:
         else analysis_config.get("batch_size_cpu", 8)
     )
     return device, batch_size
+
+
+def is_cuda_oom(exc: BaseException) -> bool:
+    """Return True when an exception looks like a CUDA out-of-memory failure."""
+
+    message = str(exc).lower()
+    return "cuda out of memory" in message or isinstance(exc, torch.OutOfMemoryError)
+
+
+def encode_with_adaptive_batch_size(
+    model: SentenceTransformer,
+    texts: list[str],
+    initial_batch_size: int,
+) -> tuple[np.ndarray, int]:
+    """Encode texts, shrinking the CUDA batch size when memory is too tight.
+
+    Why this helper exists:
+    - long paragraph-like consultation units can be very uneven in length
+    - a batch size that is fine for average chunks may still OOM on a T4
+    - rather than crashing, we progressively reduce the batch size
+    """
+
+    batch_size = max(1, int(initial_batch_size))
+    while True:
+        try:
+            embeddings = model.encode(
+                texts,
+                batch_size=batch_size,
+                show_progress_bar=True,
+                normalize_embeddings=True,
+                convert_to_numpy=True,
+            )
+            return embeddings, batch_size
+        except Exception as exc:
+            if not is_cuda_oom(exc) or batch_size <= 1:
+                raise
+            next_batch_size = max(1, batch_size // 2)
+            print(
+                "CUDA ran out of memory while encoding. "
+                f"Retrying with a smaller batch size: {batch_size} -> {next_batch_size}"
+            )
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            batch_size = next_batch_size
 
 
 def score_clustering_solution(embeddings: np.ndarray, labels: np.ndarray) -> dict[str, float]:
@@ -591,6 +637,7 @@ def main() -> None:
     model_name = analysis_config["model_name"]
     device, batch_size = configure_runtime(analysis_config)
     use_fp16_on_cuda = bool(analysis_config.get("use_fp16_on_cuda", True))
+    max_seq_length = int(analysis_config.get("max_seq_length", 0) or 0)
     central_examples = int(analysis_config.get("representative_central_examples", 3))
     diverse_examples = int(analysis_config.get("representative_diverse_examples", 2))
     top_categories = int(analysis_config["top_categories_per_cluster"])
@@ -607,6 +654,8 @@ def main() -> None:
     print(f"Loading model: {model_name}")
     print(f"Runtime device: {device}")
     print(f"Embedding batch size: {batch_size}")
+    if max_seq_length > 0:
+        print(f"Max sequence length: {max_seq_length}")
     if device == "cpu":
         print(f"PyTorch threads: {torch.get_num_threads()}")
 
@@ -622,6 +671,9 @@ def main() -> None:
             f"Original error: {exc}"
         )
         model = SentenceTransformer(model_name, device=device, token=hf_token, local_files_only=True)
+
+    if max_seq_length > 0:
+        model.max_seq_length = max_seq_length
 
     # For CUDA, half precision can materially speed up embedding without
     # changing the rest of the pipeline. We keep this conditional so CPU runs
@@ -646,13 +698,13 @@ def main() -> None:
     #
     # If the prepared file is paragraph-like:
     # - one chunk from a response = one vector
-    embeddings = model.encode(
+    embeddings, actual_batch_size = encode_with_adaptive_batch_size(
+        model,
         texts,
-        batch_size=batch_size,
-        show_progress_bar=True,
-        normalize_embeddings=True,
-        convert_to_numpy=True,
+        initial_batch_size=batch_size,
     )
+    if actual_batch_size != batch_size:
+        print(f"Embedding completed with reduced batch size: {actual_batch_size}")
     np.save(embeddings_path, embeddings)
 
     # KMeans tends to behave better after a compact PCA representation than on
