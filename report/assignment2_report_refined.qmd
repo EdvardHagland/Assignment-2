@@ -4,9 +4,11 @@ subtitle: "Artifact-driven summary of the configured compiled corpus"
 format:
   html:
     toc: true
+    toc-location: left
     toc-depth: 2
     number-sections: false
     theme: cosmo
+    smooth-scroll: true
     code-fold: false
     code-tools: false
 execute:
@@ -32,6 +34,8 @@ library(knitr)
 library(readr)
 library(tibble)
 library(yaml)
+
+dt_available <- requireNamespace("DT", quietly = TRUE)
 
 resolve_root <- function() {
   candidates <- c(".", "..")
@@ -87,6 +91,34 @@ safe_include_graphics <- function(path) {
   } else {
     cat(glue("Figure not found yet: `{basename(path)}`"))
   }
+}
+
+render_table <- function(data, caption, page_length = 10, filter = NULL) {
+  if (!dt_available) {
+    return(knitr::kable(data, caption = caption))
+  }
+
+  if (is.null(filter)) {
+    filter <- if (nrow(data) > 10 || ncol(data) > 4) "top" else "none"
+  }
+
+  DT::datatable(
+    data,
+    rownames = FALSE,
+    filter = filter,
+    class = "compact stripe hover order-column cell-border",
+    caption = htmltools::tags$caption(
+      style = "caption-side: top; text-align: left; font-weight: 600; padding: 0 0 0.5rem 0;",
+      caption
+    ),
+    options = list(
+      pageLength = min(page_length, max(5, nrow(data))),
+      lengthMenu = list(c(5, 10, 25, 50, -1), c("5", "10", "25", "50", "All")),
+      scrollX = TRUE,
+      autoWidth = TRUE,
+      dom = "ftip"
+    )
+  )
 }
 
 flatten_metadata_signals <- function(payload) {
@@ -257,6 +289,24 @@ metadata_signal_tbl <- flatten_metadata_signals(cluster_metadata_signals)
   padding: 0.85rem 1rem;
   margin: 1rem 0 1.2rem 0;
 }
+
+.callout.callout-style-minimal {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+}
+
+.callout.callout-style-minimal .callout-header {
+  background: #f7fbff;
+  border: 1px solid #d9e6f5;
+  border-radius: 8px;
+}
+
+.callout.callout-style-minimal .callout-body {
+  border: 1px solid #e6edf7;
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  padding-top: 1rem;
+}
 </style>
 ```
 
@@ -298,7 +348,7 @@ if (is.null(cluster_overview)) {
       `Share of units` = paste0(round(pct_of_units, 1), "%"),
       `Response coverage` = paste0(round(pct_of_responses, 1), "%")
     )
-  knitr::kable(overview_tbl, caption = "Comparative cluster overview")
+  render_table(overview_tbl, "Comparative cluster overview", page_length = 8)
 }
 ```
 
@@ -312,9 +362,11 @@ if (!is.na(multi_frame_share)) {
 if (is.null(response_frame_distribution)) {
   cat("Frame-overlap summary not available yet.")
 } else {
-  knitr::kable(
+  render_table(
     response_frame_distribution,
-    caption = "Number of discovered frames represented within each retained response"
+    "Number of discovered frames represented within each retained response",
+    page_length = 6,
+    filter = "none"
   )
 }
 ```
@@ -338,13 +390,14 @@ if (is.null(representative_examples_flat)) {
       Source = chunk_source,
       Excerpt = excerpt_text(clean_text, 220)
     )
-  knitr::kable(evidence_tbl, caption = "Representative evidence used for interpretation")
+  render_table(evidence_tbl, "Representative evidence used for interpretation", page_length = 9)
 }
 ```
 
 # Documentation
 
-## Corpus Snapshot
+::: {.callout-note collapse="true" appearance="minimal" icon=false}
+### Corpus Snapshot
 
 ```{r}
 snapshot_tbl <- tibble::tibble(
@@ -365,7 +418,7 @@ snapshot_tbl <- tibble::tibble(
     ifelse(is.na(attachment_rate), NA, paste0(attachment_rate, "%"))
   )
 )
-knitr::kable(snapshot_tbl, caption = "Corpus snapshot")
+render_table(snapshot_tbl, "Corpus snapshot", page_length = 6, filter = "none")
 ```
 
 ```{r}
@@ -378,11 +431,14 @@ if (length(chunk_source_counts) == 0) {
     Share = round(100 * as.integer(unlist(chunk_source_counts)) / sum(as.integer(unlist(chunk_source_counts))), 1)
   ) |>
     arrange(desc(Units))
-  knitr::kable(chunk_tbl, caption = "Where the analysis units come from")
+  render_table(chunk_tbl, "Where the analysis units come from", page_length = 6, filter = "none")
 }
 ```
 
-## Clustering Decision
+:::
+
+::: {.callout-note collapse="true" appearance="minimal" icon=false}
+### Clustering Decision
 
 ```{r}
 if (is.null(clustering_decision)) {
@@ -395,7 +451,7 @@ if (is.null(clustering_decision)) {
       clustering_decision$selected_k %||% NA_character_
     )
   )
-  knitr::kable(decision_tbl, caption = "Selected clustering solution")
+  render_table(decision_tbl, "Selected clustering solution", page_length = 5, filter = "none")
 }
 ```
 
@@ -407,10 +463,10 @@ if (is.null(model_selection)) {
     c("cluster_count", "silhouette_score", "davies_bouldin_score", "calinski_harabasz_score", "inertia"),
     names(model_selection)
   )
-  knitr::kable(
+  render_table(
     model_selection[, metric_cols, drop = FALSE],
-    digits = 4,
-    caption = "Cluster-model selection metrics"
+    "Cluster-model selection metrics",
+    page_length = 10
   )
 }
 ```
@@ -427,11 +483,14 @@ if (is.null(centroid_similarity)) {
       `Cluster right` = paste0("Cluster ", cluster_right),
       `Cosine similarity` = round(cosine_similarity, 4)
     )
-  knitr::kable(similarity_tbl, caption = "Most similar cluster-centroid pairs")
+  render_table(similarity_tbl, "Most similar cluster-centroid pairs", page_length = 10)
 }
 ```
 
-## Metadata Signals
+:::
+
+::: {.callout-note collapse="true" appearance="minimal" icon=false}
+### Metadata Signals
 
 ```{r}
 if (is.null(metadata_signal_tbl)) {
@@ -448,11 +507,14 @@ if (is.null(metadata_signal_tbl)) {
       `Corpus share` = round(100 * corpus_share, 1),
       Lift = round(lift, 2)
     )
-  knitr::kable(signal_tbl, caption = "Most overrepresented metadata values by cluster")
+  render_table(signal_tbl, "Most overrepresented metadata values by cluster", page_length = 12)
 }
 ```
 
-## Lexical Signals
+:::
+
+::: {.callout-note collapse="true" appearance="minimal" icon=false}
+### Lexical Signals
 
 ```{r}
 if (is.null(cluster_terms)) {
@@ -468,11 +530,14 @@ if (is.null(cluster_terms)) {
       `Corpus share` = round(100 * corpus_doc_share, 1),
       Score = round(salience_score, 6)
     )
-  knitr::kable(terms_tbl, caption = "Post hoc lexical signals associated with each cluster")
+  render_table(terms_tbl, "Post hoc lexical signals associated with each cluster", page_length = 12)
 }
 ```
 
-## Figures
+:::
+
+::: {.callout-note collapse="true" appearance="minimal" icon=false}
+### Figures
 
 ```{r}
 safe_include_graphics(file.path(root_dir, paths$figures_dir, "embedding_map_by_cluster.png"))
@@ -490,7 +555,10 @@ safe_include_graphics(file.path(root_dir, paths$figures_dir, "cluster_language_s
 safe_include_graphics(file.path(root_dir, paths$figures_dir, "cluster_attachment_rates.png"))
 ```
 
-## Validation
+:::
+
+::: {.callout-note collapse="true" appearance="minimal" icon=false}
+### Validation
 
 ```{r results='asis'}
 if (is.null(validation_summary)) {
@@ -504,3 +572,5 @@ if (is.null(validation_summary)) {
   )
 }
 ```
+
+:::
