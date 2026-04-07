@@ -1,6 +1,11 @@
 .env
 artifacts/
 data/
+!data/
+data/*
+!data/compiled/
+data/compiled/*
+!data/compiled/consultation_compiled.csv
 __pycache__/
 *.pyc
 *.pyo

@@ -30,18 +30,15 @@ git push -u origin main
 !pip install -r requirements.txt
 ```
 
-### 4. Upload your compiled consultation CSV
+### 4. Use the bundled compiled consultation CSV
 
-Put your file at:
+This repo can include one ready-to-run compiled corpus at:
 
 ```text
 data/compiled/consultation_compiled.csv
 ```
 
-You can do that by:
-- uploading manually in Colab
-- mounting Google Drive and copying the file there
-- or editing `config/project_config.yml` to point at a Drive path
+If you want to swap in another consultation, replace that file or edit `config/project_config.yml` to point somewhere else.
 
 ### 5. Add your tokens
 
@@ -99,6 +96,6 @@ The pipeline:
 
 ## Notes
 
-- The repo does not include the consultation corpus itself.
-- `artifacts/` and `data/` are ignored on purpose.
+- This repo is set up to optionally version one compiled consultation CSV at `data/compiled/consultation_compiled.csv`.
+- `artifacts/` are ignored on purpose, and other `data/` contents stay ignored.
 - On Colab, the heavy step is embedding. That is the main reason to run this version in the cloud.
