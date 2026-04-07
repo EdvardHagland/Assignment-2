@@ -1,0 +1,9 @@
+pandas>=2.2
+numpy>=1.26
+scikit-learn>=1.5
+matplotlib>=3.8
+seaborn>=0.13
+PyYAML>=6.0
+requests>=2.32
+sentence-transformers>=5.3
+huggingface-hub>=0.30

@@ -1,0 +1,62 @@
+paths:
+  raw_corpus: "data/compiled/consultation_compiled.csv"
+  prepared_corpus: "artifacts/data/prepared_units.csv"
+  embeddings: "artifacts/data/embeddings.npy"
+  cluster_assignments: "artifacts/data/cluster_assignments.csv"
+  cluster_summary: "artifacts/data/cluster_summary.csv"
+  model_selection: "artifacts/data/model_selection_metrics.csv"
+  clustering_decision: "artifacts/data/clustering_decision.json"
+  centroid_similarity: "artifacts/data/centroid_similarity.csv"
+  representative_examples: "artifacts/data/representative_examples.json"
+  representative_examples_flat: "artifacts/data/representative_examples_flat.csv"
+  cluster_terms: "artifacts/data/cluster_terms.csv"
+  cluster_metadata_signals: "artifacts/data/cluster_metadata_signals.json"
+  cluster_inspection_json: "artifacts/data/cluster_inspection.json"
+  cluster_inspection_markdown: "artifacts/data/cluster_inspection.md"
+  cluster_validation_summary: "artifacts/data/cluster_validation_summary.json"
+  cluster_validation_resamples: "artifacts/data/cluster_validation_resamples.csv"
+  cluster_validation_markdown: "artifacts/data/cluster_validation.md"
+  metadata_summary: "artifacts/data/metadata_summary.json"
+  qualitative_interpretation: "artifacts/data/cluster_interpretation_gemini.json"
+  figures_dir: "artifacts/figures"
+
+analysis:
+  text_column: "feedback_content_markdown"
+  english_reference_column: "feedback_content_english"
+  unit_of_analysis: "attachment_aware_paragraph"
+  min_words: 8
+  seed: 42
+  model_name: "BAAI/bge-m3"
+  device: "auto"
+  batch_size_cpu: 8
+  batch_size_cuda: 64
+  cpu_threads: 0
+  use_fp16_on_cuda: true
+  cluster_range: [3, 4, 5, 6, 7, 8]
+  selection_metric: "silhouette_score"
+  representative_central_examples: 3
+  representative_diverse_examples: 2
+  representative_examples_per_cluster: 5
+  top_categories_per_cluster: 5
+  top_terms_per_cluster: 12
+  tfidf_min_df: 5
+  tfidf_max_df: 0.4
+  paragraph_target_words: 120
+  paragraph_min_words: 40
+  pca_components: 50
+  tsne_perplexity: 35
+  validation_null_draws: 60
+  validation_bootstrap_draws: 40
+  validation_bootstrap_fraction: 0.8
+  validation_hopkins_samples: 250
+  validation_top_categories_for_tests: 8
+
+gemini:
+  enabled: false
+  model: "set-via-env-or-cli"
+  temperature: 0.2
+  max_output_tokens: 1800
+  source_text_field: "clean_text"
+
+report:
+  title: "Consultation Corpus Analysis"

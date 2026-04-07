@@ -1,0 +1,507 @@
+---
+title: "Assignment 2: Consultation Corpus Analysis Report"
+subtitle: "Artifact-driven summary of the configured compiled corpus"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: false
+    theme: cosmo
+    code-fold: false
+    code-tools: false
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  include = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center",
+  out.width = "100%"
+)
+
+library(dplyr)
+library(glue)
+library(jsonlite)
+library(knitr)
+library(readr)
+library(tibble)
+library(yaml)
+
+resolve_root <- function() {
+  candidates <- c(".", "..")
+  for (cand in candidates) {
+    config_path <- file.path(cand, "config", "project_config.yml")
+    if (file.exists(config_path)) {
+      return(normalizePath(cand, winslash = "/", mustWork = TRUE))
+    }
+  }
+  stop("Could not locate config/project_config.yml from the current working directory.")
+}
+
+safe_read_csv <- function(path) {
+  if (!file.exists(path)) {
+    return(NULL)
+  }
+  readr::read_csv(path, show_col_types = FALSE)
+}
+
+safe_read_json <- function(path) {
+  if (!file.exists(path)) {
+    return(NULL)
+  }
+  jsonlite::fromJSON(path, simplifyVector = FALSE)
+}
+
+`%||%` <- function(x, y) {
+  if (is.null(x) || length(x) == 0) {
+    return(y)
+  }
+  x
+}
+
+fmt_pct <- function(x, digits = 1) {
+  if (is.null(x) || length(x) == 0 || is.na(x)) {
+    return("NA")
+  }
+  paste0(format(round(as.numeric(x), digits), nsmall = digits), "%")
+}
+
+excerpt_text <- function(text, limit = 220) {
+  value <- ifelse(is.na(text), "", text)
+  value <- gsub("\\s+", " ", value)
+  value <- trimws(value)
+  if (nchar(value) <= limit) {
+    return(value)
+  }
+  paste0(substr(value, 1, limit - 1), "…")
+}
+
+safe_include_graphics <- function(path) {
+  if (file.exists(path)) {
+    knitr::include_graphics(path)
+  } else {
+    cat(glue("Figure not found yet: `{basename(path)}`"))
+  }
+}
+
+flatten_metadata_signals <- function(payload) {
+  if (is.null(payload) || !is.list(payload)) {
+    return(NULL)
+  }
+
+  rows <- list()
+  for (field_name in names(payload)) {
+    field_payload <- payload[[field_name]]
+    if (!is.list(field_payload)) next
+    for (cluster_id in names(field_payload)) {
+      cluster_rows <- field_payload[[cluster_id]]
+      if (!is.list(cluster_rows)) next
+      for (item in cluster_rows) {
+        rows[[length(rows) + 1]] <- data.frame(
+          cluster_id = as.character(cluster_id),
+          field = field_name,
+          value = item$value %||% NA_character_,
+          cluster_count = as.numeric(item$cluster_count %||% NA_real_),
+          cluster_share = as.numeric(item$cluster_share %||% NA_real_),
+          corpus_share = as.numeric(item$corpus_share %||% NA_real_),
+          lift = as.numeric(item$lift %||% NA_real_),
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+  }
+
+  if (length(rows) == 0) {
+    return(NULL)
+  }
+  dplyr::bind_rows(rows)
+}
+
+flatten_qualitative <- function(payload) {
+  if (is.null(payload) || is.null(payload$interpretations)) {
+    return(NULL)
+  }
+  dplyr::bind_rows(lapply(payload$interpretations, function(item) {
+    data.frame(
+      cluster_id = as.character(item$cluster_id %||% NA_character_),
+      frame_label = item$frame_label %||% NA_character_,
+      interpretive_summary = item$summary %||% NA_character_,
+      distinctive_emphasis = item$distinctive_emphasis %||% NA_character_,
+      overlap_warning = item$overlap_warning %||% NA_character_,
+      merge_candidate_with = paste(item$merge_candidate_with %||% character(0), collapse = ", "),
+      stringsAsFactors = FALSE
+    )
+  }))
+}
+
+root_dir <- resolve_root()
+config <- yaml::read_yaml(file.path(root_dir, "config", "project_config.yml"))
+paths <- config$paths
+
+prepared_df <- safe_read_csv(file.path(root_dir, paths$prepared_corpus))
+cluster_df <- safe_read_csv(file.path(root_dir, paths$cluster_assignments))
+cluster_summary <- safe_read_csv(file.path(root_dir, paths$cluster_summary))
+model_selection <- safe_read_csv(file.path(root_dir, paths$model_selection))
+clustering_decision <- safe_read_json(file.path(root_dir, paths$clustering_decision))
+centroid_similarity <- safe_read_csv(file.path(root_dir, paths$centroid_similarity))
+metadata_summary <- safe_read_json(file.path(root_dir, paths$metadata_summary))
+cluster_terms <- safe_read_csv(file.path(root_dir, paths$cluster_terms))
+cluster_metadata_signals <- safe_read_json(file.path(root_dir, paths$cluster_metadata_signals))
+representative_examples_flat <- safe_read_csv(file.path(root_dir, paths$representative_examples_flat))
+validation_summary <- safe_read_json(file.path(root_dir, paths$cluster_validation_summary))
+qualitative <- safe_read_json(file.path(root_dir, paths$qualitative_interpretation))
+qualitative_global <- if (!is.null(qualitative)) qualitative$global_assessment %||% NULL else NULL
+raw_corpus_label <- basename(paths$raw_corpus)
+
+n_units <- metadata_summary$n_units %||% metadata_summary$n_analysis_units %||% NA
+n_responses <- metadata_summary$n_retained_responses %||% metadata_summary$n_documents_retained %||% NA
+avg_unit_words <- metadata_summary$avg_unit_word_count %||% metadata_summary$avg_word_count %||% NA
+avg_response_words <- metadata_summary$avg_response_word_count %||% metadata_summary$avg_word_count %||% NA
+avg_units_per_response <- metadata_summary$avg_units_per_response %||% NA
+attachment_rate <- if (!is.null(metadata_summary$attachment_rate)) round(100 * as.numeric(metadata_summary$attachment_rate), 1) else NA
+chunk_source_counts <- metadata_summary$chunk_source_counts %||% list()
+unit_of_analysis <- metadata_summary$unit_of_analysis %||% config$analysis$unit_of_analysis
+
+qualitative_flat <- flatten_qualitative(qualitative)
+cluster_overview <- NULL
+if (!is.null(cluster_summary)) {
+  cluster_overview <- cluster_summary |>
+    mutate(
+      cluster_id = as.character(cluster_id),
+      n_units = as.numeric(n_units %||% n_documents),
+      pct_of_units = as.numeric(pct_of_units %||% pct_of_corpus),
+      n_parent_responses = as.numeric(n_parent_responses %||% n_documents),
+      pct_of_responses = as.numeric(pct_of_responses %||% pct_of_corpus),
+      avg_word_count = as.numeric(avg_word_count),
+      pct_attachment_sourced_units = as.numeric(pct_attachment_sourced_units %||% NA)
+    )
+
+  if (!is.null(qualitative_flat)) {
+    cluster_overview <- cluster_overview |>
+      left_join(qualitative_flat, by = "cluster_id")
+  }
+}
+
+response_frame_distribution <- NULL
+if (!is.null(cluster_df) && "parent_document_id" %in% names(cluster_df)) {
+  response_frame_distribution <- cluster_df |>
+    distinct(parent_document_id, cluster_id) |>
+    count(parent_document_id, name = "n_frames") |>
+    count(n_frames, name = "n_responses") |>
+    mutate(pct = round(100 * n_responses / sum(n_responses), 1))
+}
+
+multi_frame_share <- NA
+if (!is.null(response_frame_distribution)) {
+  multi_frame_share <- response_frame_distribution |>
+    filter(n_frames > 1) |>
+    summarise(pct = round(100 * sum(n_responses) / sum(response_frame_distribution$n_responses), 1)) |>
+    pull(pct)
+}
+
+metadata_signal_tbl <- flatten_metadata_signals(cluster_metadata_signals)
+```
+
+```{=html}
+<style>
+.executive-summary-box {
+  background: #f7fbff;
+  border: 1px solid #d9e6f5;
+  border-top: 6px solid #2f5aa8;
+  border-radius: 10px;
+  padding: 1.1rem 1.3rem;
+  margin: 1rem 0 1.1rem 0;
+}
+
+.executive-summary-box h2 {
+  margin-top: 0;
+  margin-bottom: 0.7rem;
+  font-size: 1.15rem;
+}
+
+.assessment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.9rem;
+  margin: 1rem 0 1.2rem 0;
+}
+
+.assessment-card {
+  background: #fbfcfe;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+}
+
+.assessment-card h3 {
+  margin-top: 0;
+  margin-bottom: 0.45rem;
+  font-size: 1rem;
+}
+
+.note-box {
+  background: #eef5ff;
+  border-left: 4px solid #2f5aa8;
+  padding: 0.85rem 1rem;
+  margin: 0.8rem 0 1rem 0;
+}
+
+.validation-box {
+  background: #fff8e8;
+  border-left: 4px solid #c57a00;
+  padding: 0.85rem 1rem;
+  margin: 1rem 0 1.2rem 0;
+}
+</style>
+```
+
+# Findings
+
+This run uses `r raw_corpus_label`, retains `r ifelse(is.na(n_responses), "NA", format(n_responses, big.mark = ","))` responses, and analyzes `r ifelse(is.na(n_units), "NA", format(n_units, big.mark = ","))` `r unit_of_analysis` units.
+
+```{r results='asis'}
+if (!is.null(qualitative_global)) {
+  cat(
+    glue(
+      "<div class='executive-summary-box'>",
+      "<h2>Executive Summary</h2>",
+      "<p>{qualitative_global$executive_summary %||% ''}</p>",
+      "</div>",
+      "<div class='assessment-grid'>",
+      "<div class='assessment-card'><h3>Overall Reading</h3><p>{qualitative_global$overall_structure %||% ''}</p></div>",
+      "<div class='assessment-card'><h3>Critical Reading</h3><p>{qualitative_global$critical_reading %||% ''}</p></div>",
+      "<div class='assessment-card'><h3>Merge Assessment</h3><p>{qualitative_global$merger_assessment %||% ''}</p></div>",
+      "</div>"
+    )
+  )
+}
+```
+
+```{r}
+if (is.null(cluster_overview)) {
+  cat("Cluster overview not found yet.")
+} else {
+  overview_tbl <- cluster_overview |>
+    arrange(as.numeric(cluster_id)) |>
+    transmute(
+      Cluster = paste0("Cluster ", cluster_id),
+      Label = frame_label %||% "Interpretive label unavailable",
+      Summary = interpretive_summary %||% "Interpretive summary unavailable",
+      `Distinctive emphasis` = distinctive_emphasis %||% "",
+      `Overlap warning` = overlap_warning %||% "",
+      `Merge candidate` = merge_candidate_with %||% "",
+      `Share of units` = paste0(round(pct_of_units, 1), "%"),
+      `Response coverage` = paste0(round(pct_of_responses, 1), "%")
+    )
+  knitr::kable(overview_tbl, caption = "Comparative cluster overview")
+}
+```
+
+```{r results='asis'}
+if (!is.na(multi_frame_share)) {
+  cat(glue("<div class='note-box'><p>{fmt_pct(multi_frame_share)} of retained responses contain more than one discovered frame.</p></div>"))
+}
+```
+
+```{r}
+if (is.null(response_frame_distribution)) {
+  cat("Frame-overlap summary not available yet.")
+} else {
+  knitr::kable(
+    response_frame_distribution,
+    caption = "Number of discovered frames represented within each retained response"
+  )
+}
+```
+
+```{r}
+if (is.null(representative_examples_flat)) {
+  cat("Representative evidence not found yet.")
+} else {
+  evidence_tbl <- representative_examples_flat |>
+    mutate(role = ifelse(is.na(role), "", role)) |>
+    group_by(cluster_id, role) |>
+    slice_head(n = 1) |>
+    ungroup() |>
+    arrange(cluster_id, role, distance_to_centroid) |>
+    transmute(
+      Cluster = paste0("Cluster ", cluster_id),
+      Role = role,
+      Actor = actor_label,
+      Type = user_type,
+      Language = language,
+      Source = chunk_source,
+      Excerpt = excerpt_text(clean_text, 220)
+    )
+  knitr::kable(evidence_tbl, caption = "Representative evidence used for interpretation")
+}
+```
+
+# Documentation
+
+## Corpus Snapshot
+
+```{r}
+snapshot_tbl <- tibble::tibble(
+  Measure = c(
+    "Retained responses",
+    "Analysis units",
+    "Average response words",
+    "Average unit words",
+    "Average units per response",
+    "Response-level attachment rate"
+  ),
+  Value = c(
+    ifelse(is.na(n_responses), NA, format(n_responses, big.mark = ",")),
+    ifelse(is.na(n_units), NA, format(n_units, big.mark = ",")),
+    ifelse(is.na(avg_response_words), NA, round(avg_response_words, 1)),
+    ifelse(is.na(avg_unit_words), NA, round(avg_unit_words, 1)),
+    ifelse(is.na(avg_units_per_response), NA, round(avg_units_per_response, 2)),
+    ifelse(is.na(attachment_rate), NA, paste0(attachment_rate, "%"))
+  )
+)
+knitr::kable(snapshot_tbl, caption = "Corpus snapshot")
+```
+
+```{r}
+if (length(chunk_source_counts) == 0) {
+  cat("Chunk-source summary not available yet.")
+} else {
+  chunk_tbl <- tibble::tibble(
+    Chunk_source = names(chunk_source_counts),
+    Units = as.integer(unlist(chunk_source_counts)),
+    Share = round(100 * as.integer(unlist(chunk_source_counts)) / sum(as.integer(unlist(chunk_source_counts))), 1)
+  ) |>
+    arrange(desc(Units))
+  knitr::kable(chunk_tbl, caption = "Where the analysis units come from")
+}
+```
+
+## Clustering Decision
+
+```{r}
+if (is.null(clustering_decision)) {
+  cat("Clustering decision manifest not found yet.")
+} else {
+  decision_tbl <- tibble::tibble(
+    Measure = c("Selection metric", "Selected cluster count"),
+    Value = c(
+      clustering_decision$selection_metric %||% NA_character_,
+      clustering_decision$selected_k %||% NA_character_
+    )
+  )
+  knitr::kable(decision_tbl, caption = "Selected clustering solution")
+}
+```
+
+```{r}
+if (is.null(model_selection)) {
+  cat("Model-selection metrics not found yet.")
+} else {
+  metric_cols <- intersect(
+    c("cluster_count", "silhouette_score", "davies_bouldin_score", "calinski_harabasz_score", "inertia"),
+    names(model_selection)
+  )
+  knitr::kable(
+    model_selection[, metric_cols, drop = FALSE],
+    digits = 4,
+    caption = "Cluster-model selection metrics"
+  )
+}
+```
+
+```{r}
+if (is.null(centroid_similarity)) {
+  cat("Centroid-similarity table not found yet.")
+} else {
+  similarity_tbl <- centroid_similarity |>
+    arrange(desc(cosine_similarity)) |>
+    head(10) |>
+    transmute(
+      `Cluster left` = paste0("Cluster ", cluster_left),
+      `Cluster right` = paste0("Cluster ", cluster_right),
+      `Cosine similarity` = round(cosine_similarity, 4)
+    )
+  knitr::kable(similarity_tbl, caption = "Most similar cluster-centroid pairs")
+}
+```
+
+## Metadata Signals
+
+```{r}
+if (is.null(metadata_signal_tbl)) {
+  cat("Metadata overrepresentation table not found yet.")
+} else {
+  signal_tbl <- metadata_signal_tbl |>
+    arrange(desc(lift), desc(cluster_count)) |>
+    head(24) |>
+    transmute(
+      Cluster = paste0("Cluster ", cluster_id),
+      Field = field,
+      Value = value,
+      `Cluster share` = round(100 * cluster_share, 1),
+      `Corpus share` = round(100 * corpus_share, 1),
+      Lift = round(lift, 2)
+    )
+  knitr::kable(signal_tbl, caption = "Most overrepresented metadata values by cluster")
+}
+```
+
+## Lexical Signals
+
+```{r}
+if (is.null(cluster_terms)) {
+  cat("Cluster-term table not found yet.")
+} else {
+  terms_tbl <- cluster_terms |>
+    arrange(cluster_id, term_rank) |>
+    transmute(
+      Cluster = paste0("Cluster ", cluster_id),
+      Rank = term_rank,
+      Term = term,
+      `Cluster share` = round(100 * cluster_doc_share, 1),
+      `Corpus share` = round(100 * corpus_doc_share, 1),
+      Score = round(salience_score, 6)
+    )
+  knitr::kable(terms_tbl, caption = "Post hoc lexical signals associated with each cluster")
+}
+```
+
+## Figures
+
+```{r}
+safe_include_graphics(file.path(root_dir, paths$figures_dir, "embedding_map_by_cluster.png"))
+```
+
+```{r}
+safe_include_graphics(file.path(root_dir, paths$figures_dir, "cluster_user_type_share.png"))
+```
+
+```{r}
+safe_include_graphics(file.path(root_dir, paths$figures_dir, "cluster_language_share.png"))
+```
+
+```{r}
+safe_include_graphics(file.path(root_dir, paths$figures_dir, "cluster_attachment_rates.png"))
+```
+
+## Validation
+
+```{r results='asis'}
+if (is.null(validation_summary)) {
+  cat("<div class='validation-box'><p>Permutation p-value not available yet.</p></div>")
+} else {
+  p_value <- validation_summary$null_summary$permutation_p_value %||% NA
+  cat(
+    glue(
+      "<div class='validation-box'><p><strong>Permutation p-value:</strong> {format(round(as.numeric(p_value), 4), nsmall = 4)}</p></div>"
+    )
+  )
+}
+```
