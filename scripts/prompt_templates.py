@@ -207,6 +207,135 @@ Input payload:
     return instructions
 
 
+def build_global_assessment_prompt(
+    batch_id: str,
+    clusters: Sequence[Mapping[str, Any]],
+    *,
+    analysis_bundle: Mapping[str, Any] | None = None,
+    cluster_interpretations: Sequence[Mapping[str, Any]] | None = None,
+    corpus_name: str,
+    research_question: str,
+) -> str:
+    """Render a full-corpus prompt for the final global assessment pass."""
+
+    payload = {
+        "batch_id": batch_id,
+        "corpus_name": corpus_name,
+        "research_question": research_question,
+        "cluster_count": len(clusters),
+        "cluster_ids_in_run": [cluster.get("cluster_id") for cluster in clusters],
+        "analysis_context": {
+            "task": (
+                "Write the final corpus-level assessment for the full clustering run. "
+                "This is a synthesis pass across every cluster in the run."
+            ),
+            "critical_note": (
+                "If the clusters mostly reflect variants of one broader discourse, say so explicitly. "
+                "But do not collapse a multi-cluster run into a claim that there is only one cluster."
+            ),
+            "consistency_note": (
+                "First-pass cluster interpretations are included as provisional summaries. "
+                "Use them as consistency hints, but resolve any conflict in favor of the raw "
+                "cluster evidence and the global tables."
+            ),
+        },
+        "global_tables": analysis_bundle or {},
+        "cluster_interpretations": [
+            {
+                "cluster_id": item.get("cluster_id"),
+                "frame_label": item.get("frame_label"),
+                "summary": _truncate_text(item.get("summary"), limit=280),
+                "distinctive_emphasis": _truncate_text(item.get("distinctive_emphasis"), limit=220),
+                "overlap_warning": _truncate_text(item.get("overlap_warning"), limit=220),
+                "merge_candidate_with": item.get("merge_candidate_with", []),
+            }
+            for item in (cluster_interpretations or [])
+        ],
+        "clusters": [],
+    }
+
+    for cluster in clusters:
+        payload["clusters"].append(
+            {
+                "cluster_id": cluster.get("cluster_id"),
+                "cluster_statistics": cluster.get("cluster_statistics", cluster.get("cluster_stats", {})),
+                "contrastive_terms": cluster.get("contrastive_terms", cluster.get("top_terms", [])),
+                "metadata_signals": cluster.get("metadata_signals", []),
+                "representative_examples": [
+                    {
+                        "source_id": ex.get("source_id"),
+                        "response_key": ex.get("response_key"),
+                        "parent_document_id": ex.get("parent_document_id"),
+                        "segment_index": ex.get("segment_index"),
+                        "segment_count": ex.get("segment_count"),
+                        "chunk_source": ex.get("chunk_source"),
+                        "unit_of_analysis": ex.get("unit_of_analysis"),
+                        "role": ex.get("role"),
+                        "actor_label": ex.get("actor_label"),
+                        "language": ex.get("language"),
+                        "user_type": ex.get("user_type"),
+                        "country": ex.get("country"),
+                        "has_attachment": ex.get("has_attachment"),
+                        "attachment_count": ex.get("attachment_count"),
+                        "submission_date": ex.get("submission_date"),
+                        "word_count": ex.get("word_count"),
+                        "original_text": _truncate_text(ex.get("original_text") or ex.get("text"), limit=650),
+                    }
+                    for ex in cluster.get("representative_examples", [])
+                ],
+            }
+        )
+
+    schema_hint = {
+        "batch_id": "string",
+        "corpus_name": "string",
+        "global_assessment": {
+            "executive_summary": "string",
+            "overall_structure": "string",
+            "critical_reading": "string",
+            "merger_assessment": "string",
+        },
+        "interpretations": [],
+    }
+
+    instructions = f"""
+You will receive a JSON payload for the full clustering run.
+Write only the final corpus-level assessment for the report.
+
+Research question:
+{research_question}
+
+Faithfulness protocol:
+- Treat this as a synthesis across the full run, not as a review of one cluster.
+- The run contains {len(clusters)} clusters overall.
+- Use the supplied cluster evidence and global tables to describe the overall structure of the run.
+- Use the first-pass cluster interpretations only as a compact recap, not as substitutes for the evidence.
+- If the clusters are weakly separated or partly overlapping, say so directly.
+- If several clusters look like sub-variants of a broader discourse, say so directly.
+- If the run contains multiple cluster IDs, do not describe it as a single-cluster result.
+
+What to return:
+- One JSON object with keys: batch_id, corpus_name, global_assessment, interpretations.
+- Fill only global_assessment.
+- Set interpretations to an empty array.
+- In global_assessment.executive_summary, write a short top-of-report synthesis of the full result set.
+- In global_assessment.overall_structure, summarize what the full clustering result appears to capture.
+- In global_assessment.critical_reading, state whether the clusters look distinct, weakly separated, overlapping, or partly artifactual.
+- In global_assessment.merger_assessment, say whether any clusters look like plausible merge candidates.
+- Keep the output compact so it remains valid JSON.
+- Keep "executive_summary" to exactly 150 words and one paragraph.
+- Do not mention embeddings, clustering, Gemini, methods, or prompt instructions.
+
+Expected structure:
+{json.dumps(schema_hint, ensure_ascii=False, indent=2)}
+
+Input payload:
+{json.dumps(payload, ensure_ascii=False, indent=2)}
+""".strip()
+
+    return instructions
+
+
 def build_repair_prompt(
     raw_response: str,
     *,

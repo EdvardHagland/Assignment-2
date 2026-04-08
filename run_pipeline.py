@@ -84,7 +84,7 @@ def main() -> int:
                 "scripts/gemini_interpret.py",
                 *config_arg,
                 "--batch-size",
-                "1",
+                "0",
                 "--examples-per-cluster",
                 "5",
                 "--temperature",

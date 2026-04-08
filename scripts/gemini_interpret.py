@@ -25,7 +25,7 @@ import urllib.request
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import yaml
 
@@ -357,6 +357,7 @@ def main() -> int:
             "global_tables_included": sorted(analysis_bundle.keys()),
             "representative_examples_per_cluster": args.examples_per_cluster,
             "joint_review": True,
+            "global_assessment_mode": "single_pass" if len(batches) == 1 else "separate_full_corpus_pass",
             "output_fields": [
                 "global_assessment",
                 "cluster_id",
@@ -453,97 +454,29 @@ def main() -> int:
             research_question=research_question,
         )
 
-        raw_text = ""
-        parsed = None
-        last_error: Optional[Exception] = None
-        next_max_output_tokens = max(args.max_output_tokens, 4096)
-        for attempt in range(1, max(1, args.retries) + 1):
-            attempt_max_output_tokens = next_max_output_tokens
-            try:
-                raw_text = call_gemini(
-                    prompt=prompt,
-                    api_key=args.api_key,
-                    model=args.model,
-                    transport=client_mode,
-                    timeout=args.timeout,
-                    max_output_tokens=attempt_max_output_tokens,
-                    temperature=args.temperature,
-                )
-                try:
-                    parsed = parse_json_response(raw_text)
-                except Exception:
-                    repair_prompt = templates.build_repair_prompt(
-                        raw_text,
-                        corpus_name=corpus_name,
-                        research_question=research_question,
-                        issues=["Previous response was malformed or truncated JSON. Return a complete valid JSON object."],
-                    )
-                    raw_text = call_gemini(
-                        prompt=repair_prompt,
-                        api_key=args.api_key,
-                        model=args.model,
-                        transport=client_mode,
-                        timeout=args.timeout,
-                        max_output_tokens=max(attempt_max_output_tokens, 7000),
-                        temperature=0.0,
-                    )
-                    parsed = parse_json_response(raw_text)
-                issues = validate_gemini_payload(parsed, expected_cluster_ids=[c.cluster_id for c in batch])
-                if issues:
-                    repair_prompt = templates.build_repair_prompt(
-                        raw_text,
-                        corpus_name=corpus_name,
-                        research_question=research_question,
-                        issues=issues,
-                    )
-                    raw_text = call_gemini(
-                        prompt=repair_prompt,
-                        api_key=args.api_key,
-                        model=args.model,
-                        transport=client_mode,
-                        timeout=args.timeout,
-                        max_output_tokens=max(attempt_max_output_tokens, 7000),
-                        temperature=0.0,
-                    )
-                    parsed = parse_json_response(raw_text)
-                    issues = validate_gemini_payload(parsed, expected_cluster_ids=[c.cluster_id for c in batch])
-                    if issues:
-                        raise ValueError("; ".join(issues))
-                break
-            except Exception as exc:  # noqa: BLE001
-                last_error = exc
-                parsed = None
-                if raw_dir:
-                    write_json(
-                        raw_dir / f"{batch_id}_attempt_{attempt}_failed.json",
-                        {
-                            "prompt": prompt,
-                            "response_text": raw_text,
-                            "error": str(exc),
-                            "max_output_tokens": attempt_max_output_tokens,
-                        },
-                    )
-                if attempt >= args.retries:
-                    break
-                next_max_output_tokens = min(max(attempt_max_output_tokens + 1500, int(attempt_max_output_tokens * 1.75)), 12000)
-                log(
-                    f"Gemini batch {batch_id} attempt {attempt} failed; "
-                    f"retrying with max_output_tokens={next_max_output_tokens}. "
-                    f"Reason: {exc}"
-                )
-                time.sleep(min(2 ** attempt, 8))
-        if parsed is None:
-            if last_error is None:
-                raise RuntimeError(f"Failed to obtain a response for {batch_id}")
-            raise RuntimeError(f"Failed to parse Gemini response for {batch_id}: {last_error}") from last_error
-
-        if raw_dir:
-            write_json(raw_dir / f"{batch_id}_raw.json", {"prompt": prompt, "response_text": raw_text})
+        parsed, _raw_text = request_gemini_payload(
+            batch_id=batch_id,
+            prompt=prompt,
+            validator=lambda payload, expected_cluster_ids=[c.cluster_id for c in batch]: validate_gemini_payload(
+                payload,
+                expected_cluster_ids=expected_cluster_ids,
+            ),
+            api_key=args.api_key,
+            model=args.model,
+            transport=client_mode,
+            timeout=args.timeout,
+            max_output_tokens=args.max_output_tokens,
+            temperature=args.temperature,
+            retries=args.retries,
+            raw_dir=raw_dir,
+            corpus_name=corpus_name,
+            research_question=research_question,
+        )
 
         interpretations = parsed.get("interpretations")
         if not isinstance(interpretations, list):
             raise ValueError(f"Gemini response for {batch_id} missing interpretations list.")
-        if "global_assessment" in parsed and not result["global_assessment"]:
+        if len(batches) == 1 and "global_assessment" in parsed and not result["global_assessment"]:
             result["global_assessment"] = normalize_global_assessment(parsed.get("global_assessment"))
 
         result["batches"].append(
@@ -561,9 +494,159 @@ def main() -> int:
         if args.sleep_between_calls > 0:
             time.sleep(args.sleep_between_calls)
 
+    if len(batches) > 1 or not result["global_assessment"]:
+        global_batch_id = "global-assessment"
+        log(
+            f"Gemini {global_batch_id}: synthesizing corpus-wide assessment "
+            f"across {len(clusters)} clusters"
+        )
+        global_prompt = templates.build_global_assessment_prompt(
+            global_batch_id,
+            [cluster_to_prompt_payload(cluster, max_examples=2) for cluster in clusters],
+            analysis_bundle=analysis_bundle,
+            cluster_interpretations=result["interpretations"],
+            corpus_name=corpus_name,
+            research_question=research_question,
+        )
+        global_payload, _global_raw_text = request_gemini_payload(
+            batch_id=global_batch_id,
+            prompt=global_prompt,
+            validator=lambda payload: validate_global_assessment_payload(payload, cluster_count=len(clusters)),
+            api_key=args.api_key,
+            model=args.model,
+            transport=client_mode,
+            timeout=args.timeout,
+            max_output_tokens=args.max_output_tokens,
+            temperature=args.temperature,
+            retries=args.retries,
+            raw_dir=raw_dir,
+            corpus_name=corpus_name,
+            research_question=research_question,
+        )
+        result["global_assessment"] = normalize_global_assessment(global_payload.get("global_assessment"))
+        result["batches"].append(
+            {
+                "batch_id": global_batch_id,
+                "cluster_ids": [c.cluster_id for c in clusters],
+                "cluster_sizes": {c.cluster_id: c.cluster_size for c in clusters},
+                "response_keys": sorted(global_payload.keys()),
+                "mode": "full_corpus_global_assessment",
+            }
+        )
+        log(f"Gemini {global_batch_id} completed")
+
+    result["batch_count"] = len(result["batches"])
     write_json(output_path, result)
     log(f"Gemini interpretation written to: {output_path}")
     return 0
+
+
+def request_gemini_payload(
+    *,
+    batch_id: str,
+    prompt: str,
+    validator: Callable[[Mapping[str, Any]], List[str]],
+    api_key: str,
+    model: str,
+    transport: str,
+    timeout: int,
+    max_output_tokens: int,
+    temperature: float,
+    retries: int,
+    raw_dir: Optional[Path],
+    corpus_name: str,
+    research_question: str,
+) -> Tuple[Dict[str, Any], str]:
+    raw_text = ""
+    parsed = None
+    last_error: Optional[Exception] = None
+    next_max_output_tokens = max(max_output_tokens, 4096)
+    for attempt in range(1, max(1, retries) + 1):
+        attempt_max_output_tokens = next_max_output_tokens
+        try:
+            raw_text = call_gemini(
+                prompt=prompt,
+                api_key=api_key,
+                model=model,
+                transport=transport,
+                timeout=timeout,
+                max_output_tokens=attempt_max_output_tokens,
+                temperature=temperature,
+            )
+            try:
+                parsed = parse_json_response(raw_text)
+            except Exception:
+                repair_prompt = templates.build_repair_prompt(
+                    raw_text,
+                    corpus_name=corpus_name,
+                    research_question=research_question,
+                    issues=["Previous response was malformed or truncated JSON. Return a complete valid JSON object."],
+                )
+                raw_text = call_gemini(
+                    prompt=repair_prompt,
+                    api_key=api_key,
+                    model=model,
+                    transport=transport,
+                    timeout=timeout,
+                    max_output_tokens=max(attempt_max_output_tokens, 7000),
+                    temperature=0.0,
+                )
+                parsed = parse_json_response(raw_text)
+            issues = validator(parsed)
+            if issues:
+                repair_prompt = templates.build_repair_prompt(
+                    raw_text,
+                    corpus_name=corpus_name,
+                    research_question=research_question,
+                    issues=issues,
+                )
+                raw_text = call_gemini(
+                    prompt=repair_prompt,
+                    api_key=api_key,
+                    model=model,
+                    transport=transport,
+                    timeout=timeout,
+                    max_output_tokens=max(attempt_max_output_tokens, 7000),
+                    temperature=0.0,
+                )
+                parsed = parse_json_response(raw_text)
+                issues = validator(parsed)
+                if issues:
+                    raise ValueError("; ".join(issues))
+            break
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            parsed = None
+            if raw_dir:
+                write_json(
+                    raw_dir / f"{batch_id}_attempt_{attempt}_failed.json",
+                    {
+                        "prompt": prompt,
+                        "response_text": raw_text,
+                        "error": str(exc),
+                        "max_output_tokens": attempt_max_output_tokens,
+                    },
+                )
+            if attempt >= retries:
+                break
+            next_max_output_tokens = min(
+                max(attempt_max_output_tokens + 1500, int(attempt_max_output_tokens * 1.75)),
+                12000,
+            )
+            log(
+                f"Gemini batch {batch_id} attempt {attempt} failed; "
+                f"retrying with max_output_tokens={next_max_output_tokens}. "
+                f"Reason: {exc}"
+            )
+            time.sleep(min(2**attempt, 8))
+    if parsed is None:
+        if last_error is None:
+            raise RuntimeError(f"Failed to obtain a response for {batch_id}")
+        raise RuntimeError(f"Failed to parse Gemini response for {batch_id}: {last_error}") from last_error
+
+    if raw_dir:
+        write_json(raw_dir / f"{batch_id}_raw.json", {"prompt": prompt, "response_text": raw_text})
+    return parsed, raw_text
 
 
 def resolve_transport(requested: str) -> str:
@@ -1148,11 +1231,14 @@ def make_batches(clusters: Sequence[Cluster], *, batch_size: int) -> List[List[C
     return batches
 
 
-def cluster_to_prompt_payload(cluster: Cluster) -> Dict[str, Any]:
+def cluster_to_prompt_payload(cluster: Cluster, *, max_examples: Optional[int] = None) -> Dict[str, Any]:
     # Gemini only gets the analysis bundle that the report can defend:
     # 1) cluster-level stats already shown in tables,
     # 2) the strongest contrastive terms from the inspection layer, and
     # 3) representative evidence units closest to the cluster centroid.
+    representative_examples = cluster.examples
+    if max_examples is not None:
+        representative_examples = representative_examples[: max(0, max_examples)]
     return {
         "cluster_id": cluster.cluster_id,
         "cluster_statistics": build_cluster_stats_payload(cluster),
@@ -1178,7 +1264,7 @@ def cluster_to_prompt_payload(cluster: Cluster) -> Dict[str, Any]:
                 "word_count": ex.word_count,
                 "original_text": ex.original_text,
             }
-            for ex in cluster.examples
+            for ex in representative_examples
         ],
     }
 
@@ -1505,6 +1591,51 @@ def validate_gemini_payload(payload: Mapping[str, Any], expected_cluster_ids: Se
             f"interpretations must cover exactly these cluster_ids: {sorted(expected)}; got {sorted(seen_cluster_ids)}."
         )
     return issues
+
+
+def validate_global_assessment_payload(payload: Mapping[str, Any], *, cluster_count: int) -> List[str]:
+    issues: List[str] = []
+
+    global_assessment = payload.get("global_assessment")
+    if not isinstance(global_assessment, Mapping):
+        issues.append("Missing global_assessment object.")
+    else:
+        executive_summary = str(global_assessment.get("executive_summary", "")).strip()
+        word_count = count_words(executive_summary)
+        if word_count < 80:
+            issues.append(f"Executive summary is too short to be useful ({word_count} words).")
+        elif word_count > 220:
+            issues.append(f"Executive summary is too long and likely drifting ({word_count} words).")
+
+        combined_text = " ".join(
+            str(global_assessment.get(key, "")).strip().lower()
+            for key in ("executive_summary", "overall_structure", "critical_reading", "merger_assessment")
+        )
+        if cluster_count > 1 and looks_like_single_cluster_claim(combined_text):
+            issues.append(
+                f"Global assessment incorrectly describes the run as one cluster although the run contains {cluster_count} clusters."
+            )
+
+    interpretations = payload.get("interpretations")
+    if not isinstance(interpretations, Sequence) or isinstance(interpretations, str):
+        issues.append("interpretations must be a list.")
+    elif len(list(interpretations)) != 0:
+        issues.append("interpretations must be an empty list for the global-assessment pass.")
+
+    return issues
+
+
+def looks_like_single_cluster_claim(text: str) -> bool:
+    normalized = " ".join(str(text or "").lower().split())
+    normalized = re.sub(r"\bnot (?:just )?(?:a )?single cluster\b", "", normalized)
+    normalized = re.sub(r"\bnot (?:just )?(?:one|only one) cluster\b", "", normalized)
+    patterns = (
+        r"\bthere (?:is|appears to be|seems to be) (?:only )?one cluster\b",
+        r"\b(?:this|the run|the result|it) (?:is|looks|appears|seems) (?:effectively |basically )?(?:a )?single cluster\b",
+        r"\bone cluster only\b",
+        r"\bonly one cluster\b",
+    )
+    return any(re.search(pattern, normalized) for pattern in patterns)
 
 
 def count_words(text: str) -> int:
