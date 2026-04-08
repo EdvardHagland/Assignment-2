@@ -52,6 +52,7 @@ Use the selector script to point that active file at one of the bundled corpora:
 ```
 
 Bundled corpora:
+- `12527`: Requirements for Artificial Intelligence
 - `16213`: European Open Digital Ecosystems
 - `14031`: Fitness check of EU legislation on trade in seal products
 - `1424`: European Defence Fund and EU Defence Industrial Development Programme
@@ -112,7 +113,7 @@ import subprocess
 
 os.makedirs("report/output", exist_ok=True)
 
-for corpus_id in ["16213", "14031", "1424"]:
+for corpus_id in ["12527", "16213", "14031", "1424"]:
     subprocess.run(
         ["python", "scripts/select_corpus.py", "--corpus", corpus_id, "--clean"],
         check=True,
