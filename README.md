@@ -1,28 +1,28 @@
 # Colab Consultation Pipeline
 
-This repo is meant to be run directly from Google Colab. Because the repo is public, nobody needs to fork it or create a new GitHub repo first. They can open a fresh Colab notebook, add their own secrets, paste one cell, and run the pipeline in their own session.
+This repo is meant to be run directly from Google Colab. Because the repo is public, nobody needs to fork it or create a new GitHub repo first. They can open the shared notebook or a fresh Colab session, add their own secrets, and run the pipeline in their own runtime.
 
-## Copy-Paste Into Colab
+## Run In Colab
 
-Before running the cell below, add these secrets in the Colab Secrets pane:
+The easiest way to run this project is the shared Colab notebook, where the user only needs to press play. The cells below mirror that notebook and are kept in the README as a transparent fallback.
+
+Before running the notebook, add these secrets in the Colab Secrets pane:
 
 - `GEMINI_API_KEY`: required if you want the Gemini interpretation stage
 - `HF_TOKEN`: optional, but recommended for faster Hugging Face downloads
 - `GEMINI_MODEL`: optional override, defaults to `gemini-3.1-pro-preview`
 
-Then paste this single cell into Google Colab:
+### Cell 1: Secrets and runtime variables
 
 ```python
 from google.colab import userdata
 import os
 import shutil
-import subprocess
 from pathlib import Path
 
-REPO_URL = "https://github.com/EdvardHagland/Assignment-2.git"
 REPO_DIR = Path("/content/Assignment-2")
 CORPUS_ID = "12527"  # default example; other options are listed below
-SKIP_VALIDATION = True
+SKIP_VALIDATION = True  # set to False if you want the full validation stage
 
 def get_secret(name, default=""):
     try:
@@ -43,26 +43,34 @@ if gemini_key:
 if gemini_model:
     os.environ["GEMINI_MODEL"] = gemini_model
 
+os.chdir("/content")
 if REPO_DIR.exists():
     shutil.rmtree(REPO_DIR)
+```
 
-subprocess.run(["git", "clone", REPO_URL, str(REPO_DIR)], check=True)
-os.chdir(REPO_DIR)
+### Cell 2: Clone the repo and install Python dependencies
 
-subprocess.run(["pip", "install", "-r", "requirements.txt"], check=True)
+```bash
+!git clone https://github.com/EdvardHagland/Assignment-2.git /content/Assignment-2
+%cd /content/Assignment-2
+!python -m pip install -r requirements.txt
+```
 
-if shutil.which("Rscript") is None:
-    subprocess.run(["apt-get", "update"], check=True)
-    subprocess.run(["apt-get", "install", "-y", "r-base"], check=True)
+### Cell 3: Install R and the report packages
 
-subprocess.run(
-    [
-        "Rscript",
-        "-e",
-        "install.packages(c('rmarkdown','knitr','dplyr','glue','jsonlite','readr','tibble','yaml','ggplot2'), repos='https://cloud.r-project.org')",
-    ],
-    check=True,
-)
+```bash
+!apt-get update
+!apt-get install -y r-base
+!Rscript -e "pkgs <- c('rmarkdown','knitr','dplyr','glue','jsonlite','readr','tibble','yaml','ggplot2'); need <- setdiff(pkgs, rownames(installed.packages())); if (length(need)) install.packages(need, repos='https://cloud.r-project.org')"
+```
+
+### Cell 4: Select the corpus and run the pipeline
+
+```python
+import os
+import subprocess
+
+os.chdir("/content/Assignment-2")
 
 subprocess.run(
     ["python", "-u", "scripts/select_corpus.py", "--corpus", CORPUS_ID, "--clean"],
@@ -72,31 +80,26 @@ subprocess.run(
 cmd = ["python", "-u", "run_pipeline.py", "--clean"]
 if SKIP_VALIDATION:
     cmd.append("--skip-validation")
-if not gemini_key:
+if not os.getenv("GEMINI_API_KEY"):
     cmd.append("--skip-gemini")
 
 subprocess.run(cmd, check=True)
 
-print(f"Done. Report written to: {REPO_DIR / 'report' / 'assignment2_report.html'}")
+print("Done. Report written to /content/Assignment-2/report/assignment2_report.html")
 ```
 
-## Bundled Corpora
+### Bundled corpora
+
+The notebook defaults to `12527`.
+
+If you want a different bundled corpus, change `CORPUS_ID` in Cell 1 to one of these:
 
 - `12527`: Requirements for Artificial Intelligence
 - `16213`: European Open Digital Ecosystems
 - `14031`: Fitness check of EU legislation on trade in seal products
 - `1424`: European Defence Fund and EU Defence Industrial Development Programme
 
-The copy-paste block above defaults to `12527`.
-
-If you want a different bundled corpus, change `CORPUS_ID` in the Colab cell to one of these:
-
-- `12527`
-- `16213`
-- `14031`
-- `1424`
-
-If `GEMINI_API_KEY` is missing, the cell still runs the quantitative pipeline and skips Gemini automatically.
+If `GEMINI_API_KEY` is missing, the pipeline still runs and simply skips the Gemini interpretation stage.
 
 ## What The Pipeline Does
 
