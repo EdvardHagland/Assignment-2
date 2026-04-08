@@ -152,13 +152,15 @@ plot_cluster_map_with_labels <- function(cluster_df, cluster_overview) {
         paste0("Cluster ", cluster_id),
         frame_label
       ),
-      legend_label = paste0("Cluster ", cluster_id, ": ", frame_label),
-      annotation_label = wrap_plot_text(frame_label, width = 20)
+      legend_label = paste0("Cluster ", cluster_id, ": ", frame_label)
     )
 
   cluster_ids <- sort_cluster_ids(unique(plot_df$cluster_id))
+  label_df <- label_df |>
+    arrange(match(cluster_id, cluster_ids))
+
   cluster_palette <- stats::setNames(
-    grDevices::hcl.colors(length(cluster_ids), "Dark 3"),
+    grDevices::palette.colors(length(cluster_ids), "Okabe-Ito"),
     cluster_ids
   )
 
@@ -169,53 +171,33 @@ plot_cluster_map_with_labels <- function(cluster_df, cluster_overview) {
   plot(
     plot_df$map_x,
     plot_df$map_y,
-    col = grDevices::adjustcolor(cluster_palette[plot_df$cluster_id], alpha.f = 0.45),
+    col = grDevices::adjustcolor(cluster_palette[plot_df$cluster_id], alpha.f = 0.7),
     pch = 16,
-    cex = 0.45,
+    cex = 0.7,
     xlab = "t-SNE dimension 1",
     ylab = "t-SNE dimension 2",
-    main = "Embedding map with interpretive cluster labels"
+    main = "Embedding map colored by interpreted cluster"
   )
 
   points(
     label_df$map_x,
     label_df$map_y,
     pch = 21,
-    cex = 1.5,
-    lwd = 1.5,
+    cex = 2.2,
+    lwd = 2,
     bg = "white",
-    col = cluster_palette[label_df$cluster_id]
-  )
-
-  text(
-    label_df$map_x,
-    label_df$map_y,
-    labels = paste0("C", label_df$cluster_id),
-    cex = 0.75,
-    font = 2,
-    col = cluster_palette[label_df$cluster_id]
-  )
-
-  text(
-    label_df$map_x,
-    label_df$map_y,
-    labels = label_df$annotation_label,
-    pos = 3,
-    offset = 0.8,
-    cex = 0.72,
-    font = 2,
     col = cluster_palette[label_df$cluster_id]
   )
 
   legend(
     "topright",
-    inset = c(-0.48, 0),
+    inset = c(-0.5, 0),
     legend = wrap_plot_text(label_df$legend_label, width = 32),
     col = cluster_palette[label_df$cluster_id],
     pch = 16,
-    pt.cex = 0.9,
+    pt.cex = 1.1,
     bty = "n",
-    cex = 0.75,
+    cex = 0.78,
     y.intersp = 1.2
   )
 }
