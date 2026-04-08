@@ -89,7 +89,13 @@ With Gemini:
 !python run_pipeline.py --skip-render
 ```
 
-If you also install R and `rmarkdown`, you can run the full render:
+If you also install R and the report packages (including `ggplot2`), you can run the full render:
+
+```python
+!Rscript -e "install.packages(c('rmarkdown','knitr','dplyr','glue','jsonlite','readr','tibble','yaml','ggplot2'), repos='https://cloud.r-project.org')"
+```
+
+Then run:
 
 ```python
 !python run_pipeline.py

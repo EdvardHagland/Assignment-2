@@ -26,6 +26,7 @@ knitr::opts_chunk$set(
 )
 
 library(dplyr)
+library(ggplot2)
 library(glue)
 library(jsonlite)
 library(knitr)
@@ -87,6 +88,23 @@ safe_include_graphics <- function(path) {
   } else {
     cat(glue("Figure not found yet: `{basename(path)}`"))
   }
+}
+
+theme_report_plot <- function() {
+  ggplot2::theme_minimal(base_size = 12) +
+    ggplot2::theme(
+      plot.title = element_text(face = "bold", size = 14, margin = margin(b = 10)),
+      axis.title = element_text(face = "bold", size = 11),
+      axis.text = element_text(color = "#374151"),
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_line(color = "#e9edf2", linewidth = 0.35),
+      legend.title = element_blank(),
+      legend.text = element_text(size = 10, lineheight = 0.95),
+      legend.key.height = grid::unit(0.85, "cm"),
+      legend.spacing.y = grid::unit(0.12, "cm"),
+      legend.margin = margin(0, 0, 0, 0),
+      plot.margin = margin(8, 18, 8, 8)
+    )
 }
 
 sort_cluster_ids <- function(ids) {
@@ -160,57 +178,63 @@ plot_cluster_map_with_labels <- function(cluster_df, cluster_overview) {
     arrange(match(cluster_id, cluster_ids))
 
   base_palette <- c(
-    "#4E79A7",
-    "#F28E2B",
-    "#59A14F",
-    "#E15759",
-    "#B07AA1",
-    "#76B7B2",
-    "#9C755F",
-    "#EDC948"
+    "#4C78A8",
+    "#F58518",
+    "#54A24B",
+    "#E45756",
+    "#B279A2",
+    "#72B7B2",
+    "#9D755D",
+    "#E2CF45"
   )
   cluster_palette <- stats::setNames(
     rep(base_palette, length.out = length(cluster_ids)),
     cluster_ids
   )
-
-  old_par <- par(no.readonly = TRUE)
-  on.exit(par(old_par), add = TRUE)
-  par(mar = c(4.5, 4.5, 3.5, 17), xpd = NA)
-
-  plot(
-    plot_df$map_x,
-    plot_df$map_y,
-    col = grDevices::adjustcolor(cluster_palette[plot_df$cluster_id], alpha.f = 0.7),
-    pch = 16,
-    cex = 0.7,
-    xlab = "t-SNE dimension 1",
-    ylab = "t-SNE dimension 2",
-    main = "Embedding map colored by interpreted cluster"
+  legend_labels <- stats::setNames(
+    wrap_plot_text(label_df$legend_label, width = 28),
+    label_df$cluster_id
   )
 
-  points(
-    label_df$map_x,
-    label_df$map_y,
-    pch = 21,
-    cex = 2.2,
-    lwd = 2,
-    bg = "white",
-    col = cluster_palette[label_df$cluster_id]
-  )
+  plot_df$cluster_id <- factor(plot_df$cluster_id, levels = cluster_ids)
+  label_df$cluster_id <- factor(label_df$cluster_id, levels = cluster_ids)
 
-  legend(
-    "topright",
-    inset = c(-0.35, 0.01),
-    legend = wrap_plot_text(label_df$legend_label, width = 24),
-    col = cluster_palette[label_df$cluster_id],
-    pch = 16,
-    pt.cex = 1.1,
-    bty = "n",
-    cex = 0.74,
-    x.intersp = 0.55,
-    y.intersp = 1.2
-  )
+  ggplot2::ggplot(
+    plot_df,
+    ggplot2::aes(x = map_x, y = map_y, colour = cluster_id)
+  ) +
+    ggplot2::geom_point(size = 1.65, alpha = 0.72, stroke = 0) +
+    ggplot2::geom_point(
+      data = label_df,
+      ggplot2::aes(x = map_x, y = map_y, colour = cluster_id),
+      inherit.aes = FALSE,
+      shape = 21,
+      fill = "white",
+      stroke = 1.4,
+      size = 5.4,
+      show.legend = FALSE
+    ) +
+    ggplot2::scale_colour_manual(
+      values = cluster_palette,
+      breaks = cluster_ids,
+      labels = legend_labels
+    ) +
+    ggplot2::guides(
+      colour = ggplot2::guide_legend(
+        override.aes = list(size = 4, alpha = 1),
+        byrow = TRUE
+      )
+    ) +
+    ggplot2::labs(
+      title = "Embedding map colored by interpreted cluster",
+      x = "t-SNE dimension 1",
+      y = "t-SNE dimension 2"
+    ) +
+    theme_report_plot() +
+    ggplot2::theme(
+      legend.position = "right",
+      legend.justification = c(0, 1)
+    )
 }
 
 flatten_metadata_signals <- function(payload) {
