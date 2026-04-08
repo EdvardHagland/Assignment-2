@@ -159,14 +159,24 @@ plot_cluster_map_with_labels <- function(cluster_df, cluster_overview) {
   label_df <- label_df |>
     arrange(match(cluster_id, cluster_ids))
 
+  base_palette <- c(
+    "#4E79A7",
+    "#F28E2B",
+    "#59A14F",
+    "#E15759",
+    "#B07AA1",
+    "#76B7B2",
+    "#9C755F",
+    "#EDC948"
+  )
   cluster_palette <- stats::setNames(
-    grDevices::palette.colors(length(cluster_ids), "Okabe-Ito"),
+    rep(base_palette, length.out = length(cluster_ids)),
     cluster_ids
   )
 
   old_par <- par(no.readonly = TRUE)
   on.exit(par(old_par), add = TRUE)
-  par(mar = c(4.5, 4.5, 3.5, 14), xpd = NA)
+  par(mar = c(4.5, 4.5, 3.5, 17), xpd = NA)
 
   plot(
     plot_df$map_x,
@@ -191,13 +201,14 @@ plot_cluster_map_with_labels <- function(cluster_df, cluster_overview) {
 
   legend(
     "topright",
-    inset = c(-0.5, 0),
-    legend = wrap_plot_text(label_df$legend_label, width = 32),
+    inset = c(-0.35, 0.01),
+    legend = wrap_plot_text(label_df$legend_label, width = 24),
     col = cluster_palette[label_df$cluster_id],
     pch = 16,
     pt.cex = 1.1,
     bty = "n",
-    cex = 0.78,
+    cex = 0.74,
+    x.intersp = 0.55,
     y.intersp = 1.2
   )
 }
@@ -415,7 +426,7 @@ if (is.null(cluster_overview)) {
 }
 ```
 
-```{r fig.width=11, fig.height=7, fig.cap="Embedding map colored by cluster and labelled with Gemini-assigned frame names."}
+```{r fig.width=12.5, fig.height=7.6, fig.cap="Embedding map colored by cluster and labelled with Gemini-assigned frame names."}
 plot_cluster_map_with_labels(cluster_df, cluster_overview)
 ```
 
