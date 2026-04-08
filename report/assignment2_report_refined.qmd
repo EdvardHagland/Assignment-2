@@ -89,6 +89,137 @@ safe_include_graphics <- function(path) {
   }
 }
 
+sort_cluster_ids <- function(ids) {
+  ids_chr <- as.character(ids)
+  ids_num <- suppressWarnings(as.numeric(ids_chr))
+  ids_chr[order(is.na(ids_num), ids_num, ids_chr)]
+}
+
+wrap_plot_text <- function(text, width = 24) {
+  value <- ifelse(is.na(text), "", as.character(text))
+  vapply(
+    value,
+    function(item) paste(strwrap(item, width = width), collapse = "\n"),
+    character(1)
+  )
+}
+
+plot_cluster_map_with_labels <- function(cluster_df, cluster_overview) {
+  required_cols <- c("cluster_id", "map_x", "map_y")
+  if (is.null(cluster_df) || !all(required_cols %in% names(cluster_df))) {
+    cat("Cluster map coordinates not available yet.")
+    return(invisible(NULL))
+  }
+
+  plot_df <- cluster_df |>
+    transmute(
+      cluster_id = as.character(cluster_id),
+      map_x = as.numeric(map_x),
+      map_y = as.numeric(map_y)
+    ) |>
+    filter(!is.na(cluster_id), !is.na(map_x), !is.na(map_y))
+
+  if (nrow(plot_df) == 0) {
+    cat("Cluster map coordinates not available yet.")
+    return(invisible(NULL))
+  }
+
+  label_df <- plot_df |>
+    group_by(cluster_id) |>
+    summarise(
+      map_x = median(map_x),
+      map_y = median(map_y),
+      .groups = "drop"
+    )
+
+  if (!is.null(cluster_overview) && "frame_label" %in% names(cluster_overview)) {
+    label_df <- label_df |>
+      left_join(
+        cluster_overview |>
+          transmute(
+            cluster_id = as.character(cluster_id),
+            frame_label = frame_label
+          ) |>
+          distinct(cluster_id, .keep_all = TRUE),
+        by = "cluster_id"
+      )
+  }
+
+  label_df <- label_df |>
+    mutate(
+      frame_label = ifelse(
+        is.na(frame_label) | !nzchar(trimws(frame_label)),
+        paste0("Cluster ", cluster_id),
+        frame_label
+      ),
+      legend_label = paste0("Cluster ", cluster_id, ": ", frame_label),
+      annotation_label = wrap_plot_text(frame_label, width = 20)
+    )
+
+  cluster_ids <- sort_cluster_ids(unique(plot_df$cluster_id))
+  cluster_palette <- stats::setNames(
+    grDevices::hcl.colors(length(cluster_ids), "Dark 3"),
+    cluster_ids
+  )
+
+  old_par <- par(no.readonly = TRUE)
+  on.exit(par(old_par), add = TRUE)
+  par(mar = c(4.5, 4.5, 3.5, 14), xpd = NA)
+
+  plot(
+    plot_df$map_x,
+    plot_df$map_y,
+    col = grDevices::adjustcolor(cluster_palette[plot_df$cluster_id], alpha.f = 0.45),
+    pch = 16,
+    cex = 0.45,
+    xlab = "t-SNE dimension 1",
+    ylab = "t-SNE dimension 2",
+    main = "Embedding map with interpretive cluster labels"
+  )
+
+  points(
+    label_df$map_x,
+    label_df$map_y,
+    pch = 21,
+    cex = 1.5,
+    lwd = 1.5,
+    bg = "white",
+    col = cluster_palette[label_df$cluster_id]
+  )
+
+  text(
+    label_df$map_x,
+    label_df$map_y,
+    labels = paste0("C", label_df$cluster_id),
+    cex = 0.75,
+    font = 2,
+    col = cluster_palette[label_df$cluster_id]
+  )
+
+  text(
+    label_df$map_x,
+    label_df$map_y,
+    labels = label_df$annotation_label,
+    pos = 3,
+    offset = 0.8,
+    cex = 0.72,
+    font = 2,
+    col = cluster_palette[label_df$cluster_id]
+  )
+
+  legend(
+    "topright",
+    inset = c(-0.48, 0),
+    legend = wrap_plot_text(label_df$legend_label, width = 32),
+    col = cluster_palette[label_df$cluster_id],
+    pch = 16,
+    pt.cex = 0.9,
+    bty = "n",
+    cex = 0.75,
+    y.intersp = 1.2
+  )
+}
+
 flatten_metadata_signals <- function(payload) {
   if (is.null(payload) || !is.list(payload)) {
     return(NULL)
@@ -302,6 +433,10 @@ if (is.null(cluster_overview)) {
 }
 ```
 
+```{r fig.width=11, fig.height=7, fig.cap="Embedding map colored by cluster and labelled with Gemini-assigned frame names."}
+plot_cluster_map_with_labels(cluster_df, cluster_overview)
+```
+
 ```{r results='asis'}
 if (!is.na(multi_frame_share)) {
   cat(glue("<div class='note-box'><p>{fmt_pct(multi_frame_share)} of retained responses contain more than one discovered frame.</p></div>"))
@@ -473,10 +608,6 @@ if (is.null(cluster_terms)) {
 ```
 
 ## Figures
-
-```{r}
-safe_include_graphics(file.path(root_dir, paths$figures_dir, "embedding_map_by_cluster.png"))
-```
 
 ```{r}
 safe_include_graphics(file.path(root_dir, paths$figures_dir, "cluster_user_type_share.png"))
