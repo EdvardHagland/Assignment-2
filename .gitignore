@@ -5,6 +5,8 @@ data/
 data/*
 !data/compiled/
 data/compiled/*
+!data/compiled/*_compiled.csv
+!data/compiled/corpus_catalog.csv
 !data/compiled/consultation_compiled.csv
 __pycache__/
 *.pyc

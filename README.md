@@ -30,15 +30,31 @@ git push -u origin main
 !pip install -r requirements.txt
 ```
 
-### 4. Use the bundled compiled consultation CSV
+### 4. Choose a bundled compiled corpus
 
-This repo can include one ready-to-run compiled corpus at:
+This repo now bundles multiple ready-to-run compiled corpora in:
+
+```text
+data/compiled/
+```
+
+The active pipeline target remains:
 
 ```text
 data/compiled/consultation_compiled.csv
 ```
 
-If you want to swap in another consultation, replace that file or edit `config/project_config.yml` to point somewhere else.
+Use the selector script to point that active file at one of the bundled corpora:
+
+```python
+!python scripts/select_corpus.py --list
+!python scripts/select_corpus.py --corpus 16213
+```
+
+Bundled corpora:
+- `16213`: European Open Digital Ecosystems
+- `14031`: Fitness check of EU legislation on trade in seal products
+- `1424`: European Defence Fund and EU Defence Industrial Development Programme
 
 ### 5. Add your tokens
 
@@ -78,6 +94,39 @@ If you also install R and `rmarkdown`, you can run the full render:
 !python run_pipeline.py
 ```
 
+### 7. Try another bundled corpus
+
+Switch the active corpus, rerun the pipeline, and render again:
+
+```python
+!python scripts/select_corpus.py --corpus 14031
+!python run_pipeline.py --skip-validation
+```
+
+If you want to test several bundled corpora in one Colab session and keep each HTML output:
+
+```python
+import os
+import shutil
+import subprocess
+
+os.makedirs("report/output", exist_ok=True)
+
+for corpus_id in ["16213", "14031", "1424"]:
+    subprocess.run(
+        ["python", "scripts/select_corpus.py", "--corpus", corpus_id],
+        check=True,
+    )
+    subprocess.run(
+        ["python", "run_pipeline.py", "--skip-validation"],
+        check=True,
+    )
+    shutil.copyfile(
+        "report/assignment2_report.html",
+        f"report/output/{corpus_id}_assignment2_report.html",
+    )
+```
+
 ## What this repo does
 
 The pipeline:
@@ -93,6 +142,7 @@ The pipeline:
 
 - `config/project_config.yml`: pipeline configuration
 - `run_pipeline.py`: simple Colab-friendly launcher
+- `scripts/select_corpus.py`: switch the active bundled corpus in Colab
 - `scripts/prepare_corpus.py`: unit construction
 - `scripts/embed_cluster.py`: embeddings, clustering, and figures
 - `scripts/validate_clusters.py`: permutation/bootstrap validation
@@ -102,6 +152,6 @@ The pipeline:
 
 ## Notes
 
-- This repo is set up to optionally version one compiled consultation CSV at `data/compiled/consultation_compiled.csv`.
+- This repo now bundles multiple compiled consultation CSVs and uses `data/compiled/consultation_compiled.csv` as the active alias that the pipeline reads.
 - `artifacts/` are ignored on purpose, and other `data/` contents stay ignored.
 - On Colab, the heavy step is embedding. That is the main reason to run this version in the cloud.
