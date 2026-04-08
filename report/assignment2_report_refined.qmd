@@ -230,10 +230,201 @@ plot_cluster_map_with_labels <- function(cluster_df, cluster_overview) {
       x = "t-SNE dimension 1",
       y = "t-SNE dimension 2"
     ) +
+    ggplot2::coord_equal() +
     theme_report_plot() +
     ggplot2::theme(
       legend.position = "right",
       legend.justification = c(0, 1)
+    )
+}
+
+cluster_label_table <- function(cluster_overview, cluster_ids) {
+  labels <- tibble::tibble(cluster_id = as.character(cluster_ids))
+  if (!is.null(cluster_overview) && "frame_label" %in% names(cluster_overview)) {
+    labels <- labels |>
+      left_join(
+        cluster_overview |>
+          transmute(
+            cluster_id = as.character(cluster_id),
+            frame_label = frame_label
+          ) |>
+          distinct(cluster_id, .keep_all = TRUE),
+        by = "cluster_id"
+      )
+  }
+
+  labels |>
+    mutate(
+      frame_label = ifelse(
+        is.na(frame_label) | !nzchar(trimws(frame_label)),
+        paste0("Cluster ", cluster_id),
+        frame_label
+      ),
+      cluster_display = paste0("Cluster ", cluster_id),
+      cluster_axis_label = wrap_plot_text(paste0(cluster_display, ": ", frame_label), width = 34)
+    )
+}
+
+prepare_cluster_share_data <- function(cluster_df, cluster_overview, category_col, top_n = 6) {
+  required_cols <- c("cluster_id", category_col)
+  if (is.null(cluster_df) || !all(required_cols %in% names(cluster_df))) {
+    return(NULL)
+  }
+
+  plot_df <- cluster_df
+  if ("parent_document_id" %in% names(plot_df)) {
+    plot_df <- plot_df |>
+      distinct(cluster_id, parent_document_id, .keep_all = TRUE)
+  }
+
+  category_values <- plot_df[[category_col]]
+  category_values <- ifelse(is.na(category_values) | !nzchar(trimws(as.character(category_values))), "Unknown", as.character(category_values))
+  top_categories <- names(sort(table(category_values), decreasing = TRUE))[seq_len(min(top_n, length(unique(category_values))))]
+  category_values <- ifelse(category_values %in% top_categories, category_values, "Other")
+
+  share_df <- plot_df |>
+    transmute(
+      cluster_id = as.character(cluster_id),
+      category = category_values
+    ) |>
+    count(cluster_id, category, name = "n") |>
+    group_by(cluster_id) |>
+    mutate(share = 100 * n / sum(n)) |>
+    ungroup()
+
+  cluster_ids <- sort_cluster_ids(unique(share_df$cluster_id))
+  label_tbl <- cluster_label_table(cluster_overview, cluster_ids)
+
+  share_df |>
+    left_join(label_tbl, by = "cluster_id") |>
+    mutate(
+      cluster_axis_label = factor(cluster_axis_label, levels = rev(label_tbl$cluster_axis_label)),
+      category = factor(category, levels = rev(sort(unique(category))))
+    )
+}
+
+plot_cluster_share_chart <- function(share_df, title) {
+  if (is.null(share_df) || nrow(share_df) == 0) {
+    cat("Composition figure not available yet.")
+    return(invisible(NULL))
+  }
+
+  fill_values <- stats::setNames(
+    grDevices::hcl.colors(length(levels(share_df$category)), "Set 2"),
+    levels(share_df$category)
+  )
+
+  ggplot2::ggplot(
+    share_df,
+    ggplot2::aes(x = share, y = cluster_axis_label, fill = category)
+  ) +
+    ggplot2::geom_col(width = 0.72, colour = "white", linewidth = 0.22) +
+    ggplot2::scale_fill_manual(values = fill_values) +
+    ggplot2::scale_x_continuous(
+      limits = c(0, 100),
+      breaks = c(0, 25, 50, 75, 100),
+      labels = function(x) paste0(x, "%"),
+      expand = ggplot2::expansion(mult = c(0, 0.01))
+    ) +
+    ggplot2::labs(
+      title = title,
+      x = "Share within cluster",
+      y = NULL
+    ) +
+    theme_report_plot() +
+    ggplot2::theme(
+      legend.position = "bottom",
+      legend.direction = "horizontal",
+      legend.box = "vertical",
+      axis.text.y = element_text(size = 10),
+      panel.grid.major.y = element_blank()
+    ) +
+    ggplot2::guides(fill = ggplot2::guide_legend(nrow = 2, byrow = TRUE))
+}
+
+prepare_attachment_rate_data <- function(cluster_df, cluster_overview) {
+  if (is.null(cluster_df) || !"cluster_id" %in% names(cluster_df)) {
+    return(NULL)
+  }
+
+  if ("chunk_source" %in% names(cluster_df)) {
+    rate_df <- cluster_df |>
+      transmute(
+        cluster_id = as.character(cluster_id),
+        attachment_rate = 100 * as.numeric(chunk_source == "attachment_markdown")
+      ) |>
+      group_by(cluster_id) |>
+      summarise(attachment_rate = mean(attachment_rate, na.rm = TRUE), .groups = "drop")
+    title <- "Share of units sourced from attachment markdown"
+  } else if ("has_attachment" %in% names(cluster_df)) {
+    plot_df <- cluster_df
+    if ("parent_document_id" %in% names(plot_df)) {
+      plot_df <- plot_df |>
+        distinct(cluster_id, parent_document_id, .keep_all = TRUE)
+    }
+    attachment_flag <- as.character(plot_df$has_attachment)
+    attachment_flag <- attachment_flag %in% c("TRUE", "True", "true", "1")
+    rate_df <- plot_df |>
+      transmute(
+        cluster_id = as.character(cluster_id),
+        attachment_rate = 100 * as.numeric(attachment_flag)
+      ) |>
+      group_by(cluster_id) |>
+      summarise(attachment_rate = mean(attachment_rate, na.rm = TRUE), .groups = "drop")
+    title <- "Share of responses with attachments"
+  } else {
+    return(NULL)
+  }
+
+  cluster_ids <- sort_cluster_ids(unique(rate_df$cluster_id))
+  label_tbl <- cluster_label_table(cluster_overview, cluster_ids)
+
+  rate_df |>
+    left_join(label_tbl, by = "cluster_id") |>
+    mutate(
+      cluster_axis_label = factor(cluster_axis_label, levels = rev(label_tbl$cluster_axis_label)),
+      title = title
+    )
+}
+
+plot_attachment_rate_chart <- function(rate_df) {
+  if (is.null(rate_df) || nrow(rate_df) == 0) {
+    cat("Attachment-rate figure not available yet.")
+    return(invisible(NULL))
+  }
+
+  line_color <- "#97A6BA"
+  point_color <- "#5B7FA3"
+
+  ggplot2::ggplot(rate_df, ggplot2::aes(x = attachment_rate, y = cluster_axis_label)) +
+    ggplot2::geom_segment(
+      ggplot2::aes(x = 0, xend = attachment_rate, yend = cluster_axis_label),
+      linewidth = 1.2,
+      colour = line_color
+    ) +
+    ggplot2::geom_point(size = 3.8, colour = point_color) +
+    ggplot2::geom_text(
+      ggplot2::aes(label = paste0(round(attachment_rate, 1), "%")),
+      hjust = -0.15,
+      size = 3.4,
+      colour = "#32465A"
+    ) +
+    ggplot2::scale_x_continuous(
+      limits = c(0, max(100, max(rate_df$attachment_rate, na.rm = TRUE) + 8)),
+      breaks = c(0, 25, 50, 75, 100),
+      labels = function(x) paste0(x, "%"),
+      expand = ggplot2::expansion(mult = c(0, 0.02))
+    ) +
+    ggplot2::labs(
+      title = unique(rate_df$title)[1],
+      x = "Rate",
+      y = NULL
+    ) +
+    theme_report_plot() +
+    ggplot2::theme(
+      legend.position = "none",
+      axis.text.y = element_text(size = 10),
+      panel.grid.major.y = element_blank()
     )
 }
 
@@ -626,16 +817,19 @@ if (is.null(cluster_terms)) {
 
 ## Figures
 
-```{r}
-safe_include_graphics(file.path(root_dir, paths$figures_dir, "cluster_user_type_share.png"))
+```{r fig.width=10.8, fig.height=5.9, fig.cap="User-type composition within each cluster, counting each parent response at most once per cluster."}
+user_type_share_df <- prepare_cluster_share_data(cluster_df, cluster_overview, "user_type", top_n = 6)
+plot_cluster_share_chart(user_type_share_df, "User-type composition within clusters")
 ```
 
-```{r}
-safe_include_graphics(file.path(root_dir, paths$figures_dir, "cluster_language_share.png"))
+```{r fig.width=10.8, fig.height=5.9, fig.cap="Language composition within each cluster, counting each parent response at most once per cluster."}
+language_share_df <- prepare_cluster_share_data(cluster_df, cluster_overview, "language", top_n = 6)
+plot_cluster_share_chart(language_share_df, "Language composition within clusters")
 ```
 
-```{r}
-safe_include_graphics(file.path(root_dir, paths$figures_dir, "cluster_attachment_rates.png"))
+```{r fig.width=10.6, fig.height=5.2, fig.cap="Attachment-derived share by cluster."}
+attachment_rate_df <- prepare_attachment_rate_data(cluster_df, cluster_overview)
+plot_attachment_rate_chart(attachment_rate_df)
 ```
 
 ## Validation
