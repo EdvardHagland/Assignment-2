@@ -21,7 +21,7 @@ from pathlib import Path
 
 REPO_URL = "https://github.com/EdvardHagland/Assignment-2.git"
 REPO_DIR = Path("/content/Assignment-2")
-CORPUS_ID = "16213"  # choose from: 12527, 16213, 14031, 1424
+CORPUS_ID = "12527"  # default example; other options are listed below
 SKIP_VALIDATION = True
 
 def get_secret(name, default=""):
@@ -87,7 +87,16 @@ print(f"Done. Report written to: {REPO_DIR / 'report' / 'assignment2_report.html
 - `14031`: Fitness check of EU legislation on trade in seal products
 - `1424`: European Defence Fund and EU Defence Industrial Development Programme
 
-Change `CORPUS_ID` in the Colab cell to switch corpus. If `GEMINI_API_KEY` is missing, the cell still runs the quantitative pipeline and skips Gemini automatically.
+The copy-paste block above defaults to `12527`.
+
+If you want a different bundled corpus, change `CORPUS_ID` in the Colab cell to one of these:
+
+- `12527`
+- `16213`
+- `14031`
+- `1424`
+
+If `GEMINI_API_KEY` is missing, the cell still runs the quantitative pipeline and skips Gemini automatically.
 
 ## What The Pipeline Does
 
