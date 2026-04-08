@@ -1,10 +1,10 @@
 # Colab Consultation Pipeline
 
-This repo is meant to be run directly from Google Colab. Because the repo is public, nobody needs to fork it or create a new GitHub repo first. They can open the shared notebook or a fresh Colab session, add their own secrets, and run the pipeline in their own runtime.
+This repository runs directly in Google Colab. The repository is public, so it can be cloned into any Colab runtime without creating a separate fork.
 
 ## Run In Colab
 
-The easiest way to run this project is the shared Colab notebook, where the user only needs to press play. The cells below mirror that notebook and are kept in the README as a transparent fallback.
+Use the shared Colab notebook, or run the cells below in a fresh Colab runtime.
 
 Before running the notebook, add these secrets in the Colab Secrets pane:
 
