@@ -48,7 +48,7 @@ Use the selector script to point that active file at one of the bundled corpora:
 
 ```python
 !python scripts/select_corpus.py --list
-!python scripts/select_corpus.py --corpus 16213
+!python scripts/select_corpus.py --corpus 16213 --clean
 ```
 
 Bundled corpora:
@@ -99,8 +99,8 @@ If you also install R and `rmarkdown`, you can run the full render:
 Switch the active corpus, rerun the pipeline, and render again:
 
 ```python
-!python scripts/select_corpus.py --corpus 14031
-!python run_pipeline.py --skip-validation
+!python scripts/select_corpus.py --corpus 14031 --clean
+!python run_pipeline.py --clean --skip-validation
 ```
 
 If you want to test several bundled corpora in one Colab session and keep each HTML output:
@@ -114,11 +114,11 @@ os.makedirs("report/output", exist_ok=True)
 
 for corpus_id in ["16213", "14031", "1424"]:
     subprocess.run(
-        ["python", "scripts/select_corpus.py", "--corpus", corpus_id],
+        ["python", "scripts/select_corpus.py", "--corpus", corpus_id, "--clean"],
         check=True,
     )
     subprocess.run(
-        ["python", "run_pipeline.py", "--skip-validation"],
+        ["python", "run_pipeline.py", "--clean", "--skip-validation"],
         check=True,
     )
     shutil.copyfile(

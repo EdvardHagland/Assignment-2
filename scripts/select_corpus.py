@@ -10,6 +10,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 COMPILED_DIR = PROJECT_ROOT / "data" / "compiled"
 CATALOG_PATH = COMPILED_DIR / "corpus_catalog.csv"
 ACTIVE_PATH = COMPILED_DIR / "consultation_compiled.csv"
+ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
+REPORT_HTML = PROJECT_ROOT / "report" / "assignment2_report.html"
 
 
 def load_catalog() -> list[dict[str, str]]:
@@ -68,6 +70,15 @@ def copy_active_corpus(record: dict[str, str]) -> None:
     print(f"Active file updated: {ACTIVE_PATH.relative_to(PROJECT_ROOT)}")
 
 
+def clean_previous_outputs() -> None:
+    if ARTIFACTS_DIR.exists():
+        shutil.rmtree(ARTIFACTS_DIR)
+        print(f"Removed stale artifacts: {ARTIFACTS_DIR.relative_to(PROJECT_ROOT)}")
+    if REPORT_HTML.exists():
+        REPORT_HTML.unlink()
+        print(f"Removed stale report: {REPORT_HTML.relative_to(PROJECT_ROOT)}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="List bundled compiled corpora or select one as the active consultation corpus."
@@ -81,6 +92,11 @@ def main() -> int:
         "--corpus",
         help="Corpus id or filename stem to activate, for example 16213 or 14031_compiled.",
     )
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Remove stale artifacts and the previous HTML report after switching corpora.",
+    )
     args = parser.parse_args()
 
     records = load_catalog()
@@ -92,6 +108,8 @@ def main() -> int:
 
     record = resolve_record(records, args.corpus)
     copy_active_corpus(record)
+    if args.clean:
+        clean_previous_outputs()
     return 0
 
 

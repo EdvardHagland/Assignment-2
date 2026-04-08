@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -36,9 +37,22 @@ def run_step(command: list[str], cwd: Path) -> None:
     log(f"Finished in {elapsed:.1f}s: {' '.join(command)}")
 
 
+def clean_outputs(project_root: Path) -> None:
+    artifacts_dir = project_root / "artifacts"
+    report_html = project_root / "report" / "assignment2_report.html"
+
+    if artifacts_dir.exists():
+        log(f"Removing stale artifacts directory: {artifacts_dir}")
+        shutil.rmtree(artifacts_dir)
+    if report_html.exists():
+        log(f"Removing stale report file: {report_html}")
+        report_html.unlink()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the consultation pipeline in a Colab-friendly way.")
     parser.add_argument("--config", default="config/project_config.yml")
+    parser.add_argument("--clean", action="store_true")
     parser.add_argument("--skip-validation", action="store_true")
     parser.add_argument("--skip-gemini", action="store_true")
     parser.add_argument("--skip-render", action="store_true")
@@ -47,6 +61,9 @@ def main() -> int:
     project_root = Path(__file__).resolve().parent
     log("Loading environment variables from .env if present")
     load_env(project_root / ".env")
+
+    if args.clean:
+        clean_outputs(project_root)
 
     os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(os.cpu_count() or 2))
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
